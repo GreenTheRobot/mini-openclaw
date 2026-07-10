@@ -8,22 +8,14 @@ from .base import Tool
 from .edit import _edit, edit_tool
 from .grep import _grep, grep_tool
 from .glob import _glob, glob_tool
+from .web import _web_fetch, web_fetch_tool
 
 
 # --- edit：三种策略权衡（整文件重写 / unified diff / search-replace）---
 # 已拆分到 edit.py；这里保留 edit_tool 导出，兼容旧的导入路径。
-
-
 # --- grep：基于 ripgrep ---
-
-
 # --- glob：按文件名模式找文件 ---
-
-
 # --- web_fetch：URL -> markdown，控 token 预算 ---
-def _web_fetch(url: str, max_tokens: int = 2000) -> str:
-    # TODO[Day7] httpx 抓取 -> markdownify 转 markdown -> 截断到预算内
-    raise NotImplementedError("Day7：实现 web_fetch")
 
 
 # --- task_list（TodoWrite）：自维护待办，提升长任务成功率 ---
@@ -34,9 +26,7 @@ def _task_list(action: str, items: list | None = None) -> str:
 
 
 
-web_fetch_tool = Tool("web_fetch", "抓取 URL 并转为 markdown（受 token 预算限制）。",
-                      {"type": "object", "properties": {"url": {"type": "string"}},
-                       "required": ["url"]}, _web_fetch)
+
 task_list_tool = Tool("task_list", "维护任务待办清单（add/update/complete）。",
                       {"type": "object", "properties": {"action": {"type": "string"},
                        "items": {"type": "array"}}, "required": ["action"]}, _task_list)

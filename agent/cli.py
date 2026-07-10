@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 import argparse
+from pathlib import Path
+import shutil
 import sys
 
 from tools.base import build_default_registry
@@ -51,6 +53,19 @@ def main(argv: list[str] | None = None) -> int:
     # 真正跑任务：优先用 DeepSeek API；没配 key 时回退到 FakeBackend（离线打通管道）
     from agent.loop import AgentLoop
     reg = build_default_registry()
+    try:
+        from mcp.client import MCPClient, register_mcp_tools
+        if shutil.which("npx"):
+            mcp = MCPClient([
+                "npx", "-y", "@modelcontextprotocol/server-filesystem",
+                str(Path.cwd()),
+            ])
+        else:
+            mcp = MCPClient(["python", "mcp/calc_server.py"])
+        mcp.start()
+        register_mcp_tools(reg, mcp)
+    except Exception as e:  # noqa
+        print(f"[提示] MCP 未接入（{e}），仅用内置工具。")
     try:
         from backend.client import DeepSeekBackend
         backend = DeepSeekBackend()                       # 需要 DEEPSEEK_API_KEY
