@@ -12,10 +12,10 @@ description: "当用户要求通过微信、文件传输助手、wxauto、Window
 1. 先确认要发送的精确文本。
 2. 调用 `wechat_file_transfer` 工具，并传入 `message`。
 3. 除非用户指定了其它微信会话，否则使用默认目标 `文件传输助手`。
-4. 如果桥接服务无法连接，提示用户启动 Windows 侧服务：
+4. 如果桥接服务无法连接，提示用户登录微信客户端并在具备 wxauto4 的 Windows 环境中启动 Windows 侧服务：
 
    ```powershell
-   E:\wxauto-mcp\wxauto_env\Scripts\python.exe services\wx_file_transfer_server.py
+   python services\wx_file_transfer_server.py
    ```
 
 5. 如果启用了 token 鉴权，WSL/客户端环境必须设置和 Windows 服务端相同的 `WX_BRIDGE_TOKEN`。
