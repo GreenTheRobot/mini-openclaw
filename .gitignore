@@ -8,3 +8,4 @@ out-*/
 docx/
 *.log
 wxauto_logs/
+test/
