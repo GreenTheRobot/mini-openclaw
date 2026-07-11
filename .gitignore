@@ -6,4 +6,5 @@ out-*/
 *.gguf
 .DS_Store
 docx/
-
+*.log
+wxauto_logs/
