@@ -21,6 +21,8 @@ import httpx
 
 
 class DeepSeekBackend:
+    supports_tools = True
+
     def __init__(self,
                  api_key: str | None = None,
                  base_url: str | None = None,
@@ -67,7 +69,28 @@ class DeepSeekBackend:
                 out.append({"role": "assistant", "content": m.get("content") or None,
                             "tool_calls": self._to_openai_tool_calls(m["tool_calls"])})
             else:
-                out.append({"role": role, "content": m.get("content", "")})
+                out.append({"role": role,
+                            "content": self._to_openai_content(m.get("content", ""))})
+        return out
+
+    @staticmethod
+    def _to_openai_content(content: Any) -> Any:
+        """支持文本或 Anthropic 风格内容块列表，发送前转为 OpenAI 兼容格式。"""
+        if not isinstance(content, list):
+            return content
+
+        out = []
+        for block in content:
+            if block.get("type") == "text":
+                out.append({"type": "text", "text": block.get("text", "")})
+            elif block.get("type") == "image":
+                src = block.get("source", {})
+                media_type = src.get("media_type", "image/png")
+                data = src.get("data", "")
+                out.append({"type": "image_url",
+                            "image_url": {"url": f"data:{media_type};base64,{data}"}})
+            else:
+                out.append(block)
         return out
 
     @staticmethod
