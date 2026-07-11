@@ -18,6 +18,7 @@ SKILL.md 结构（约定）：
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 
 @dataclass
@@ -29,8 +30,15 @@ class Skill:
 
 
 def parse_skill_md(text: str, path: Path) -> Skill:
-    # TODO[Day9] 解析 YAML frontmatter（name/description）+ 正文 body
-    raise NotImplementedError("Day9：解析 SKILL.md frontmatter")
+    import yaml
+    name = description = ""
+    body = text
+    if text.startswith("---"):
+        _, fm, body = text.split("---", 2)   # 头尾两个 --- 之间是 frontmatter
+        meta = yaml.safe_load(fm) or {}
+        name = meta.get("name", "")
+        description = meta.get("description", "")
+    return Skill(name=name, description=description, body=body.strip(), path=path)
 
 
 def load_skills(root: str = "skills") -> list[Skill]:
@@ -45,3 +53,49 @@ def skills_catalog(skills: list[Skill]) -> str:
     """生成给模型看的可用 skill 清单（name + description），用于按需召回。"""
     # TODO[Day9] 渲染成一段文本，放进系统提示词
     return "\n".join(f"- {s.name}: {s.description}" for s in skills)
+
+
+def _match_score(task: str, skill: Skill) -> int:
+    """用轻量关键词匹配估算某个 skill 是否和当前任务相关。"""
+    task_l = task.lower()
+    haystack = f"{skill.name} {skill.description}".lower()
+    score = 0
+
+    # 英文、扩展名、数字等 token，例如 csv / markdown / .csv。
+    for token in re.findall(r"[a-z0-9_.+-]+", haystack):
+        if len(token) >= 2 and token in task_l:
+            score += 3
+
+    # 中文没有空格，退化为 2~4 字短语匹配；命中多个短语才更可信。
+    chinese = "".join(re.findall(r"[\u4e00-\u9fff]+", haystack))
+    seen: set[str] = set()
+    for n in (4, 3, 2):
+        for i in range(0, max(0, len(chinese) - n + 1)):
+            token = chinese[i:i + n]
+            if token in seen:
+                continue
+            seen.add(token)
+            if token in task:
+                score += n
+    return score
+
+
+def select_skills(task: str, skills: list[Skill], limit: int = 3,
+                  min_score: int = 6) -> list[Skill]:
+    """根据用户任务和 skill 描述做按需召回。"""
+    scored = [(score, skill) for skill in skills
+              if (score := _match_score(task, skill)) >= min_score]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [skill for _, skill in scored[:limit]]
+
+
+def render_skill_bodies(skills: list[Skill]) -> str:
+    """把命中的 skill 正文渲染成可注入系统提示词的文本。"""
+    parts = []
+    for skill in skills:
+        parts.append(
+            f"## Skill: {skill.name}\n"
+            f"用途：{skill.description}\n\n"
+            f"{skill.body}"
+        )
+    return "\n\n".join(parts)

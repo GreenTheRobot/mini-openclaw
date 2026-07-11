@@ -45,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="mini-openclaw")
     p.add_argument("task", nargs="?", help="要让 agent 完成的任务（自然语言）")
     p.add_argument("--selfcheck", action="store_true", help="只做骨架自检")
+    p.add_argument("--image", action="append", default=[],
+                   help="随用户消息发送的图片路径；可多次传入")
     args = p.parse_args(argv)
 
     if args.selfcheck or not args.task:
@@ -66,15 +68,43 @@ def main(argv: list[str] | None = None) -> int:
         register_mcp_tools(reg, mcp)
     except Exception as e:  # noqa
         print(f"[提示] MCP 未接入（{e}），仅用内置工具。")
+    if args.image:
+        try:
+            from backend.qwen_vision import QwenVisionBackend
+            backend = QwenVisionBackend()                 # 需要 QWEN_* 占位配置
+        except Exception as e:  # noqa
+            from backend.fake_backend import FakeBackend
+            print(f"[提示] 未启用视觉后端（{e}），回退 FakeBackend。配置 QWEN_* 后即用视觉模型。")
+            backend = FakeBackend()
+    else:
+        try:
+            from backend.client import DeepSeekBackend
+            backend = DeepSeekBackend()                   # 需要 DEEPSEEK_API_KEY
+        except Exception as e:  # noqa
+            from backend.fake_backend import FakeBackend
+            print(f"[提示] 未启用真后端（{e}），回退 FakeBackend。配置 DEEPSEEK_API_KEY 后即用真模型。")
+            backend = FakeBackend()
+    system = SYSTEM_PROMPT
     try:
-        from backend.client import DeepSeekBackend
-        backend = DeepSeekBackend()                       # 需要 DEEPSEEK_API_KEY
+        from skills.loader import (
+            load_skills,
+            render_skill_bodies,
+            select_skills,
+            skills_catalog,
+        )
+        skills = load_skills()
+        catalog = skills_catalog(skills)
+        if catalog:
+            system += "\n\n# 可用 Skills（相关时按其流程执行）\n" + catalog
+        selected = select_skills(args.task, skills)
+        selected_bodies = render_skill_bodies(selected)
+        if selected_bodies:
+            system += "\n\n# 本次任务召回的 Skill 细则\n" + selected_bodies
     except Exception as e:  # noqa
-        from backend.fake_backend import FakeBackend
-        print(f"[提示] 未启用真后端（{e}），回退 FakeBackend。配置 DEEPSEEK_API_KEY 后即用真模型。")
-        backend = FakeBackend()
-    agent = AgentLoop(backend, reg, SYSTEM_PROMPT)
-    print(agent.run(args.task))
+        print(f"[提示] Skills 未加载（{e}），仅使用基础系统提示词。")
+
+    agent = AgentLoop(backend, reg, system)
+    print(agent.run(args.task, image_paths=args.image))
     return 0
 
 

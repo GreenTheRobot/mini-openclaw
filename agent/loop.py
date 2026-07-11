@@ -14,6 +14,8 @@ Day5 你要把下面的 run() 真正实现出来（Day6 随工具集扩展完善
 from __future__ import annotations
 from typing import Any
 
+from backend.multimodal import image_block
+
 from agent.context import maybe_compact, truncate_observation
 from tools.base import ToolRegistry
 
@@ -26,13 +28,19 @@ class AgentLoop:
         self.system_prompt = system_prompt
         self.max_turns = max_turns          # 防死循环：硬上限
 
-    def run(self, user_task: str) -> str:
+    def run(self, user_task: str, image_paths: list[str] | None = None) -> str:
+        user_content: Any = user_task
+        if image_paths:
+            user_content = [{"type": "text", "text": user_task}]
+            user_content.extend(image_block(path) for path in image_paths)
+
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_task},
+            {"role": "user", "content": user_content},
         ]
         for turn in range(self.max_turns):
-            assistant = self.backend.chat(messages, tools=self.registry.schemas())
+            tools = self.registry.schemas() if getattr(self.backend, "supports_tools", True) else []
+            assistant = self.backend.chat(messages, tools=tools)
             messages.append({"role": "assistant",
                              "content": assistant.get("content", ""),
                              "tool_calls": assistant.get("tool_calls", [])})
