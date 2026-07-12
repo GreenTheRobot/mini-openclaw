@@ -169,6 +169,15 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:  # noqa
         _print(f"[提示] Skills 未加载（{e}），仅使用基础系统提示词。")
 
+    try:
+        from agent.memory import Memory
+        mem = Memory("MEMORY.md")
+        recalled = mem.recall()
+        if recalled.strip():
+            system += "\n\n# 关于本项目 / 用户的已知记忆（相关时遵循）\n" + recalled
+    except Exception as e:
+        _print(f"[提示] 记忆系统未加载（{e}）。")
+
     agent = AgentLoop(
         backend,
         reg,

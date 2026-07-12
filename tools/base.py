@@ -64,7 +64,7 @@ def build_default_registry() -> ToolRegistry:
     from .shell import bash_tool
     for t in (read_tool, write_tool, bash_tool):
         reg.register(t)
-    
+
     # TODO[Day6] 再加入完整工具集（→ v1 里程碑）：
     from .edit import edit_tool
     from .grep import grep_tool
@@ -78,5 +78,7 @@ def build_default_registry() -> ToolRegistry:
         reg.register(t)
     from .wechat import wechat_file_transfer_tool
     reg.register(wechat_file_transfer_tool)
+    from .memory import remember_tool
+    reg.register(remember_tool)
     #from .task import task_list_tool
     return reg
