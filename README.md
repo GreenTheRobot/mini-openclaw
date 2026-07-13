@@ -125,6 +125,7 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 - [X] 完成 shell 工具兜底防护：`bash` 工具对 `rm -rf ~`、`rm -rf /`、`rm -rf $HOME`、`curl/wget` 等高危命令做工具层拒绝，并优先使用 `bwrap` 隔离网络和文件系统写入范围。
 - [X] 完成外部内容注入防护：远程网页内容经 `wrap_external(...)` 标记为非用户指令，本地 HTML 经 `wrap_local_html(...)` 标记为非用户指令。
 - [X] 完成 web_fetch 白名单扩展：支持科研、论文、文档、GitHub Pages、常见搜索入口和开发者文档等常用域名及其子域名。
+- [X] 完成微信工具 dry-run 与自动桥接启动：设置 `WECHAT_DRY_RUN=1` 后，Agent 仍正常调用 `wechat_file_transfer`，实际只在终端打印发送对象和内容；非 dry-run 下连接失败会默认通过 `services\wechat_bridge\start.ps1` 拉起 Windows 侧桥接服务，也可用 `WECHAT_BRIDGE_START_CMD` 覆盖。
 - [X] 完成红队测试脚本：`security/redteam.py` 可真实发起 `python -m agent.cli "content"`，统一回答权限确认并将原始结果写入 CSV。
 - [X] 完成红队报告：`security/redteam_report.md` 基于最新 CSV 人工总结被拦截项、暴露缺口和改进建议。
 - [X] 完成评测基础模块：包含任务集、轨迹记录、工具调用指标、消融样例和 LLM-as-judge 雏形。
@@ -154,6 +155,7 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 - `grep`：基于 ripgrep 搜索文件内容，返回文件和行号。
 - `glob`：按通配模式递归查找文件。
 - `web_fetch`：抓取白名单域名 URL，转成 markdown，控制返回长度，并用 `external` wrapper 标记为非用户指令。
+- `wechat_file_transfer`：向微信会话发送文本，默认目标为文件传输助手；用户明确指定其它会话时可传 `target`。设置 `WECHAT_DRY_RUN=1` 时只在终端打印目标和内容，不连接桥接服务、不发送真实消息；连接不上桥接服务时会默认尝试启动 `services\wechat_bridge\start.ps1`，可用 `WECHAT_BRIDGE_START_CMD` 覆盖启动命令。
 
 ### 安全层能力
 

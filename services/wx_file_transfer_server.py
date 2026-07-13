@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import ssl
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import RLock
 from typing import Any
@@ -40,6 +41,14 @@ def _get_wx():
     return _wx
 
 
+def _safe_chat_info(wx) -> dict[str, Any]:
+    try:
+        info = wx.ChatInfo()
+        return info if isinstance(info, dict) else {"raw": repr(info)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def send_message(message: str, target: str, exact: bool = False) -> dict[str, Any]:
     if not message:
         raise ValueError("message must not be empty")
@@ -48,13 +57,48 @@ def send_message(message: str, target: str, exact: bool = False) -> dict[str, An
 
     with _lock:
         wx = _get_wx()
-        wx.ChatWith(target, exact=exact)
-        chat_info = wx.ChatInfo()
-        chat_name = chat_info.get("chat_name")
-        if chat_name != target:
-            raise RuntimeError(f"active chat is {chat_name!r}, expected {target!r}")
-        wx.SendMsg(message)
-        return {"target": target, "chat_info": chat_info}
+        attempts = []
+        for attempt in range(2):
+            try:
+                response = wx.SendMsg(msg=message, who=target, exact=exact)
+                chat_info = _safe_chat_info(wx)
+                return {
+                    "target": target,
+                    "chat_info": chat_info,
+                    "response": repr(response),
+                    "attempt": attempt + 1,
+                }
+            except Exception as e:
+                attempts.append(
+                    {
+                        "stage": "SendMsg",
+                        "attempt": attempt + 1,
+                        "error": str(e),
+                        "chat_info": _safe_chat_info(wx),
+                    }
+                )
+                time.sleep(0.5)
+
+        try:
+            wx.ChatWith(target, exact=exact)
+            chat_info = _safe_chat_info(wx)
+            response = wx.SendMsg(msg=message)
+            return {
+                "target": target,
+                "chat_info": chat_info,
+                "response": repr(response),
+                "fallback": "ChatWith+SendMsg",
+                "attempts": attempts,
+            }
+        except Exception as e:
+            attempts.append(
+                {
+                    "stage": "ChatWith+SendMsg",
+                    "error": str(e),
+                    "chat_info": _safe_chat_info(wx),
+                }
+            )
+            raise RuntimeError(f"send failed after retries: {attempts}") from e
 
 
 class Handler(BaseHTTPRequestHandler):
