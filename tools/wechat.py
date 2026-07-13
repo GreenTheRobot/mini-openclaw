@@ -96,45 +96,15 @@ def _send_file_transfer_message(
 
 wechat_file_transfer_tool = Tool(
     name="wechat_file_transfer",
-    description=(
-        "Send a text message to WeChat File Transfer Assistant through the "
-        "Windows wxauto4 bridge service."
-    ),
+    description="经本机受控桥接服务向微信文件传输助手发送文本通知。联系人、桥接地址和认证令牌只能由环境配置，模型不能修改。",
     parameters={
         "type": "object",
         "properties": {
-            "message": {"type": "string", "description": "Text message to send"},
-            "target": {
-                "type": "string",
-                "description": "WeChat chat name; defaults to File Transfer Assistant",
-                "default": FILE_TRANSFER_ASSISTANT,
-            },
-            "bridge_url": {
-                "type": "string",
-                "description": (
-                    "Windows bridge URL; defaults to WX_BRIDGE_URL or the inferred "
-                    "Windows host from WSL"
-                ),
-            },
-            "token": {
-                "type": "string",
-                "description": "Optional auth token; defaults to WX_BRIDGE_TOKEN",
-            },
-            "verify_tls": {
-                "type": "boolean",
-                "description": (
-                    "Whether to verify TLS certificates for HTTPS; self-signed "
-                    "certificates usually use false"
-                ),
-                "default": False,
-            },
-            "timeout": {
-                "type": "integer",
-                "description": "Request timeout in seconds",
-                "default": 15,
-            },
+            "message": {"type": "string", "description": "要发送的通知文本"},
+            "timeout": {"type": "integer", "description": "请求超时秒数", "default": 15},
         },
         "required": ["message"],
+        "additionalProperties": False,
     },
     run=_send_file_transfer_message,
 )

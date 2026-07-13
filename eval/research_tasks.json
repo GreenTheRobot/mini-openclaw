@@ -1,0 +1,22 @@
+[
+  {
+    "name": "read-config",
+    "prompt": "读取 config.json，准确告诉我 seed 的值，不要猜测。",
+    "fixtures": {"config.json": "{\"seed\": 123, \"epochs\": 2}\n"},
+    "expected_output": ["123"]
+  },
+  {
+    "name": "edit-and-run",
+    "prompt": "读取 hello.py，把 TODO 修改为打印 hello research，然后运行验证。",
+    "fixtures": {"hello.py": "# TODO\n"},
+    "expected_files": {"hello.py": "hello research"},
+    "expected_output": ["hello research"]
+  },
+  {
+    "name": "recover-from-error",
+    "prompt": "运行 calc.py，定位并修复报错，重新运行并告诉我结果。",
+    "fixtures": {"calc.py": "print(1 / 0)\n"},
+    "expected_files": {"calc.py": "print"},
+    "expected_output": ["成功", "完成", "result", "结果"]
+  }
+]

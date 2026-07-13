@@ -1,4 +1,4 @@
-"""受控 shell 执行（Day5：bash；Day10：加沙箱与权限）。"""
+"""受控 shell 执行与跨平台危险命令拦截。"""
 from __future__ import annotations
 
 import os
@@ -7,10 +7,13 @@ import shlex
 import shutil
 import subprocess
 
-from .base import Tool
+from .base import Tool, ToolResult
 
 
-DENY = (":(){", "mkfs", "dd if=", "> /dev/sd", "curl", "wget")  # 兜底黑名单
+DENY = (
+    ":(){", "mkfs", "dd if=", "> /dev/sd", "curl", "wget", "diskpart",
+    "format c:", "shutdown /s", "cipher /w",
+)
 SHELL_OPERATORS = {"&&", "||", ";", "|", "&"}
 
 
@@ -22,7 +25,7 @@ def _is_dangerous_rm_target(target: str) -> bool:
     stripped = target.strip("'\"")
     return (
         stripped in {"/", "/*", "~", "~/", "$HOME", "${HOME}", ".", "./", "..", "../", "*"}
-        or stripped.startswith(("/", "~", "$HOME", "${HOME"))
+        or stripped.startswith(("/", "~", "$HOME", "${HOME}"))
         or stripped.startswith(("/home/", "/root/", "/Users/", "/mnt/c/", "/mnt/c/Users/"))
         or "*" in stripped
     )
@@ -34,72 +37,77 @@ def _has_dangerous_rm(command: str) -> bool:
     except ValueError:
         tokens = command.split()
 
-    for i, token in enumerate(tokens):
+    for index, token in enumerate(tokens):
         if token != "rm":
             continue
-
         recursive = False
         force = False
-        j = i + 1
-        while j < len(tokens) and _is_rm_option(tokens[j]):
-            opt = tokens[j].lower()
-            recursive = recursive or "r" in opt or "recursive" in opt
-            force = force or "f" in opt or "force" in opt
-            j += 1
-
-        while j < len(tokens) and tokens[j] not in SHELL_OPERATORS:
-            if recursive and force and _is_dangerous_rm_target(tokens[j]):
+        cursor = index + 1
+        while cursor < len(tokens) and _is_rm_option(tokens[cursor]):
+            option = tokens[cursor].lower()
+            recursive = recursive or "r" in option or "recursive" in option
+            force = force or "f" in option or "force" in option
+            cursor += 1
+        while cursor < len(tokens) and tokens[cursor] not in SHELL_OPERATORS:
+            if recursive and force and _is_dangerous_rm_target(tokens[cursor]):
                 return True
-            j += 1
+            cursor += 1
 
-    # Extra belt-and-suspenders check for compact shell text that shlex may not
-    # preserve as expected, such as aliases or unusual quoting.
     return bool(re.search(r"\brm\s+-[^\n;|&]*[rf][^\n;|&]*\s+(~|\$HOME|\$\{HOME\}|/|\*|\.)", command))
 
 
 def _build_command(command: str) -> tuple[list[str] | str, bool]:
     if shutil.which("bwrap"):
-        # 只读挂载系统、可写仅工作目录、禁网（--unshare-net）
         return ([
-            "bwrap",
-            "--ro-bind", "/", "/",
-            "--bind", ".", ".",
-            "--unshare-net",
-            "--dev", "/dev",
-            "bash", "-c", command,
+            "bwrap", "--ro-bind", "/", "/", "--bind", ".", ".",
+            "--unshare-net", "--dev", "/dev", "bash", "-c", command,
         ], False)
     if shutil.which("bash"):
         return (["bash", "-c", command], False)
     return (command, True)
 
 
-def _bash(command: str, timeout: int = 30) -> str:
-    # 沙箱判断
-    if any(bad in command for bad in DENY) or _has_dangerous_rm(command):
-        return "[沙箱] 拒绝执行高危命令：%s" % command
+def is_dangerous_command(command: str) -> bool:
+    lowered = command.lower()
+    dangerous_windows_delete = bool(re.search(
+        r"\b(remove-item|del|erase|rd|rmdir)\b[^\n]*(/s|/q|-recurse|-force)[^\n]*(\\users\\|c:\\|\$env:userprofile|~)",
+        lowered,
+    ))
+    return any(bad in lowered for bad in DENY) or _has_dangerous_rm(command) or dangerous_windows_delete
+
+
+def _bash(command: str, timeout: int = 30) -> ToolResult:
+    if is_dangerous_command(command):
+        return ToolResult(f"[沙箱] 拒绝执行高危命令：{command}", False, "sandbox_denied")
 
     cmd, use_shell = _build_command(command)
-    # 执行
     try:
-        p = subprocess.run(
+        process = subprocess.run(
             cmd, shell=use_shell, capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return f"[超时] 命令超过 {timeout}s 未结束：{command}"
-    out = p.stdout or ""
-    if p.stderr:
-        out += f"\n[stderr]\n{p.stderr}"
-    if p.returncode != 0:
-        out += f"\n[returncode={p.returncode}]"
-    return out.strip() or "[无输出]"
-    
+        return ToolResult(f"[超时] 命令超过 {timeout}s 未结束：{command}", False, "timeout")
+
+    output = process.stdout or ""
+    if process.stderr:
+        output += f"\n[stderr]\n{process.stderr}"
+    if process.returncode != 0:
+        output += f"\n[returncode={process.returncode}]"
+        return ToolResult(output.strip(), False, "nonzero_exit")
+    return ToolResult(output.strip() or "[无输出]", True, "ok")
 
 
 bash_tool = Tool(
     name="bash",
-    description="在工作目录中执行一条 shell 命令并返回输出。",
-    parameters={"type": "object",
-                "properties": {"command": {"type": "string"}},
-                "required": ["command"]},
+    description="在工作目录中执行一条受控 shell 命令并返回输出；危险命令会被拦截。",
+    parameters={
+        "type": "object",
+        "properties": {
+            "command": {"type": "string"},
+            "timeout": {"type": "integer"},
+        },
+        "required": ["command"],
+        "additionalProperties": False,
+    },
     run=_bash,
 )

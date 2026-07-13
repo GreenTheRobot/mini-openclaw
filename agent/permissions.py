@@ -9,6 +9,11 @@ WRITE = {"write", "edit"}
 EXEC = {"bash"}
 NETWORK = {"web_search", "web_fetch", "wechat_file_transfer"}
 MEMORY_WRITE = {"remember"}
+PLANNING = {"task_list"}
+PDF_READ = {"pdf_extract_text", "pdf_metadata"}
+EXPERIMENT_READ = {"experiment_status"}
+EXPERIMENT_WRITE = {"experiment_prepare", "experiment_report"}
+EXPERIMENT_EXEC = {"experiment_smoke_test", "experiment_start"}
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,16 @@ def check(tool: str, args: dict[str, Any], workdir: Path) -> PermissionDecision:
         return _bash_decision(args)
     if tool in NETWORK:
         return PermissionDecision("confirm", "网络访问或外部发送需要确认后执行")
+    if tool in PDF_READ:
+        return _path_decision(args, workdir, confirm=False)
+    if tool in EXPERIMENT_READ:
+        return PermissionDecision("allow", "仅读取工作目录内实验状态")
+    if tool in EXPERIMENT_WRITE:
+        return PermissionDecision("confirm", "将写入工作目录内实验元数据或报告")
+    if tool in EXPERIMENT_EXEC:
+        return PermissionDecision("confirm", "将执行或启动实验命令")
+    if tool in PLANNING:
+        return PermissionDecision("allow", "任务规划状态仅写入工作目录内部状态文件")
     if tool in MEMORY_WRITE:
         return PermissionDecision("confirm", "将持久化跨会话项目记忆，需确认适合长期保存")
     return PermissionDecision("confirm", f"未知或外部工具 {tool} 需要确认后执行")

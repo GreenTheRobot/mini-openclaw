@@ -53,8 +53,11 @@ class DeepSeekBackend:
             json=payload,
         )
         resp.raise_for_status()
-        msg = resp.json()["choices"][0]["message"]
-        return self._normalize(msg)
+        data = resp.json()
+        result = self._normalize(data["choices"][0]["message"])
+        result["usage"] = data.get("usage", {})
+        result["model"] = data.get("model", self.model)
+        return result
 
     # --- 把内部 messages（含 role=tool）转成 OpenAI 标准格式 ---
     def _to_openai_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

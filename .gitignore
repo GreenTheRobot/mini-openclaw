@@ -9,3 +9,8 @@ docx/
 *.log
 wxauto_logs/
 test/
+node_modules/
+.mini-openclaw/
+runs/
+traces/
+demo_project/model.txt

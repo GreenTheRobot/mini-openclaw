@@ -1,60 +1,65 @@
-"""上下文管理（Day7）：token 预算、滑动窗口、自动摘要 / compaction。
-
-模型上下文窗口有限。长任务里 messages 会越堆越长，迟早超预算。
-策略：
-  - 估算当前 messages 的 token 数；
-  - 超过阈值时触发 compaction：把较早的对话摘要成一条 system 备忘，
-    保留最近 K 轮原文 + 关键工具结果；
-  - tool result 过长时先截断/摘要再注入。
-"""
+"""上下文预算、结构化 compaction 与长 observation 截断。"""
 from __future__ import annotations
+
 from typing import Any
 
 
 def estimate_tokens(messages: list[dict[str, Any]]) -> int:
-    # TODO[Day7] 粗估即可（字符数/4 或用 tokenizer 精确数）
-    return sum(len(str(m.get("content", ""))) for m in messages) // 4
+    """无需额外 tokenizer 的保守估计；中文按约 1.5 字/token 处理。"""
+    characters = sum(len(str(message.get("content", ""))) for message in messages)
+    return max(1, characters // 2)
 
 
 def _summarize(backend: Any, chunk: list[dict[str, Any]]) -> str:
-    text = "\n".join(f"{m['role']}: {m.get('content','')}" for m in chunk)
-    prompt = "把下面的对话历史压缩成要点，保留任务目标、关键发现、已完成步骤：\n" + text
-    resp = backend.chat([{"role": "user", "content": prompt}], tools=[])
-    return resp.get("content", "")
+    text = "\n".join(f"{message['role']}: {message.get('content', '')}" for message in chunk)
+    prompt = (
+        "请把历史压缩成结构化备忘，不得遗漏硬约束。严格使用以下标题：\n"
+        "## 原始任务目标\n## 用户硬性约束\n## 已完成步骤\n## 已修改文件\n"
+        "## 关键工具结果\n## 失败与原因\n## 当前任务清单\n## 下一步\n\n" + text
+    )
+    response = backend.chat([{"role": "user", "content": prompt}], tools=[])
+    return str(response.get("content", ""))
 
 
 def _recent_window_start(messages: list[dict[str, Any]], recent_turns: int) -> int:
-    """返回最近 recent_turns 个 user 回合的起始下标。"""
     seen = 0
-    for i in range(len(messages) - 1, 0, -1):
-        if messages[i].get("role") == "user":
+    for index in range(len(messages) - 1, 0, -1):
+        if messages[index].get("role") == "user":
             seen += 1
             if seen == recent_turns:
-                return i
-    return 1
+                return index
+    # 单任务 Agent 的 user 消息通常只有一条，此时至少保留最近 6 条消息。
+    return max(1, len(messages) - 6)
 
 
 def maybe_compact(messages: list[dict[str, Any]], backend: Any,
-                  budget: int = 6000, recent_turns: int = 4) -> list[dict[str, Any]]:
-    """超预算则压缩历史，返回新的 messages。"""
-    if estimate_tokens(messages) <= budget:
+                  budget: int = 6000, recent_turns: int = 2) -> list[dict[str, Any]]:
+    if estimate_tokens(messages) <= budget or len(messages) <= 3:
         return messages
-
-    if not messages:
-        return messages
-
     system = messages[0]
     start = _recent_window_start(messages, recent_turns)
     middle = messages[1:start]
     recent = messages[start:]
+    if not middle:
+        return messages
+    summary = _summarize(backend, middle)
+    compacted_system = dict(system)
+    compacted_system["content"] = (
+        str(system.get("content", "")).rstrip()
+        + "\n\n# 历史压缩备忘（必须继续遵循）\n"
+        + summary
+    )
+    return [compacted_system, *recent]
 
-    summary = _summarize(backend, middle) if middle else "无可压缩历史。"
-    memo = {"role": "system", "content": "历史备忘：" + summary}
-    return [system, memo] + recent
 
-
-def truncate_observation(text: str, max_chars: int = 4000) -> str:
-    """工具结果过长时截断并提示。"""
+def truncate_observation(text: str, max_chars: int = 4000,
+                         archive_path: str | None = None) -> str:
+    """同时保留头尾；完整内容可由主循环保存并提供 archive_path。"""
     if len(text) <= max_chars:
         return text
-    return text[:max_chars] + f"\n...[已截断，共 {len(text)} 字符]"
+    half = max_chars // 2
+    location = f"完整结果：{archive_path}\n" if archive_path else ""
+    return (
+        location + text[:half] +
+        f"\n...[中间已截断；原始长度 {len(text)} 字符]...\n" + text[-half:]
+    )

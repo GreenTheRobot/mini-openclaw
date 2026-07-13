@@ -1,41 +1,68 @@
-"""极小轨迹记录器：一步一行 JSON（JSONL），可回放。"""
+"""Agent 运行轨迹：逐事件 JSONL，支持回放与汇总。"""
 from __future__ import annotations
-import json, time
+
+import json
+import os
+import time
 from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
 
 class Tracer:
-    def __init__(self, path: str):
+    def __init__(self, path: str | Path, run_id: str | None = None):
         self.path = Path(path)
-        self.path.write_text("", encoding="utf-8")   # 清空/新建
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text("", encoding="utf-8")
+        self.run_id = run_id or uuid4().hex
+
+    def log_event(self, event: str, **payload: Any) -> None:
+        record = {
+            "ts": round(time.time(), 3),
+            "run_id": self.run_id,
+            "event": event,
+            **payload,
+        }
+        with self.path.open("a", encoding="utf-8") as file:
+            file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def log_step(self, step: int, tool_calls: list, prompt_tokens: int,
-                 completion_tokens: int, note: str = "") -> None:
-        event = {"ts": round(time.time(), 3), "step": step,
-                 "tool_calls": tool_calls, "note": note,
-                 "prompt_tokens": prompt_tokens,
-                 "completion_tokens": completion_tokens}
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+                 completion_tokens: int, note: str = "", **extra: Any) -> None:
+        self.log_event(
+            "step",
+            step=step,
+            tool_calls=tool_calls,
+            note=note,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            **extra,
+        )
 
-def replay(path: str) -> None:
-    """把一条 JSONL 轨迹逐步打印出来（回放）。"""
-    total_tok = 0
+
+def summarize(path: str | Path) -> dict[str, Any]:
+    records = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines()]
+    steps = [record for record in records if record.get("event") == "step"]
+    prompt_tokens = sum(step.get("prompt_tokens", 0) for step in steps)
+    completion_tokens = sum(step.get("completion_tokens", 0) for step in steps)
+    input_price = float(os.environ.get("OPENCLAW_INPUT_USD_PER_MILLION", "0"))
+    output_price = float(os.environ.get("OPENCLAW_OUTPUT_USD_PER_MILLION", "0"))
+    estimated_cost = (prompt_tokens * input_price + completion_tokens * output_price) / 1_000_000
+    return {
+        "events": len(records),
+        "steps": len(steps),
+        "tool_calls": sum(len(step.get("tool_calls", [])) for step in steps),
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "estimated_cost_usd": round(estimated_cost, 8),
+        "errors": sum(1 for record in records if record.get("success") is False),
+        "duration_ms": sum(step.get("duration_ms", 0) for step in steps),
+    }
+
+
+def replay(path: str | Path) -> None:
     for line in Path(path).read_text(encoding="utf-8").splitlines():
-        e = json.loads(line)
-        tok = e["prompt_tokens"] + e["completion_tokens"]
-        total_tok += tok
-        names = [tc["name"] for tc in e["tool_calls"]] or ["(无工具调用)"]
-        print(f"  step {e['step']}: 调用 {names}  | 本步 {tok} tok  | {e['note']}")
-    print(f"  —— 轨迹共 {total_tok} token")
-
-if __name__ == "__main__":
-    # 用步骤 2 的一条样本喂进来（模拟 D4 真 agent 逐步 log 的效果）
-    from eval.metrics import SAMPLE_RECORDS
-    rec = SAMPLE_RECORDS[0]
-    tr = Tracer("eval/trace_sample.jsonl")
-    for i, s in enumerate(rec["steps"]):
-        tr.log_step(i, s.get("tool_calls", []),
-                    s.get("prompt_tokens", 0), s.get("completion_tokens", 0),
-                    note=s.get("raw", "")[:100])
-    print(f"已写入 eval/trace_sample.jsonl（任务={rec['task']}）；回放：")
-    replay("eval/trace_sample.jsonl")
+        event = json.loads(line)
+        if event.get("event") == "step":
+            names = [call.get("name", "?") for call in event.get("tool_calls", [])] or ["(无工具)"]
+            print(f"step {event['step']}: {names} | {event.get('duration_ms', 0)} ms | {event.get('note', '')}")
+    print(json.dumps(summarize(path), ensure_ascii=False, indent=2))

@@ -1,5 +1,41 @@
 # mini-OpenClaw（学生 starter 仓库）
 
+## 科研工作流终版
+
+本项目已扩展为命令行科研智能体：能够规划长任务、检索与阅读论文、理解和修改科研代码、准备/监控实验、解析日志、生成可复现报告，并通过 MCP、Skills、多模态、记忆、安全层和 Trace 扩展。
+
+```powershell
+python -m agent.cli --selfcheck
+python -m pytest -q tests
+python -m agent.cli
+```
+
+直接运行 `python -m agent.cli` 会进入持续交互会话：
+
+```text
+mini-openclaw> 分析当前项目，告诉我训练入口
+[tool] glob ...
+[tool] grep ...
+mini-openclaw> 根据刚才的结果检查配置文件
+mini-openclaw> /tasks
+mini-openclaw> /trace
+mini-openclaw> /exit
+```
+
+一次性命令仍然可用：
+
+```powershell
+python -m agent.cli "分析这个科研项目并告诉我训练入口" --trace traces/demo.jsonl
+```
+
+关键文档：
+
+- [课程验收矩阵](docs/acceptance-matrix.md)
+- [系统架构与设计取舍](docs/architecture.md)
+- [Demo Day 操作手册](docs/demo-day.md)
+- [安全说明](security/README.md)
+- [评测与真实消融](eval/README.md)
+
 > 你将在这 10 天里，把这个骨架填成一个能在命令行里干活的通用智能体。
 > 每个模块里都有 `# TODO[DayN]` 标记，告诉你哪天该填哪里。
 
