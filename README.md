@@ -155,7 +155,7 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 - `grep`：基于 ripgrep 搜索文件内容，返回文件和行号。
 - `glob`：按通配模式递归查找文件。
 - `web_fetch`：抓取白名单域名 URL，转成 markdown，控制返回长度，并用 `external` wrapper 标记为非用户指令。
-- `wechat_file_transfer`：向微信会话发送文本，默认目标为文件传输助手；用户明确指定其它会话时可传 `target`。设置 `WECHAT_DRY_RUN=1` 时只在终端打印目标和内容，不连接桥接服务、不发送真实消息；连接不上桥接服务时会默认尝试启动 `services\wechat_bridge\start.ps1`，可用 `WECHAT_BRIDGE_START_CMD` 覆盖启动命令。
+- `wechat_file_transfer`：向固定允许列表内的微信会话发送文本，默认目标为文件传输助手；额外目标需由运行环境预先配置 `WX_ALLOWED_TARGETS`，用户/模型不能临时扩展联系人。设置 `WECHAT_DRY_RUN=1` 时只在终端打印目标和内容，不连接桥接服务、不发送真实消息；连接不上桥接服务时会默认尝试启动 `services\wechat_bridge\start.ps1`，可用 `WECHAT_BRIDGE_START_CMD` 覆盖启动命令。
 
 ### 安全层能力
 

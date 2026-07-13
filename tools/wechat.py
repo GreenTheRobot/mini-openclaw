@@ -30,10 +30,33 @@ def _running_in_wsl() -> bool:
         return False
 
 
+def _split_targets(raw: str) -> list[str]:
+    targets: list[str] = []
+    for chunk in raw.replace(";", ",").split(","):
+        target = chunk.strip()
+        if target and target not in targets:
+            targets.append(target)
+    return targets
+
+
+def allowed_targets() -> list[str]:
+    targets = [FILE_TRANSFER_ASSISTANT]
+    configured_default = os.environ.get("WX_FILE_TRANSFER_TARGET", "").strip()
+    if configured_default and configured_default not in targets:
+        targets.append(configured_default)
+    for target in _split_targets(os.environ.get("WX_ALLOWED_TARGETS", "")):
+        if target not in targets:
+            targets.append(target)
+    return targets
+
+
 def _resolve_target(target: str | None = None) -> str:
-    if target:
-        return target
-    return os.environ.get("WX_FILE_TRANSFER_TARGET", FILE_TRANSFER_ASSISTANT) or FILE_TRANSFER_ASSISTANT
+    selected = target or os.environ.get("WX_FILE_TRANSFER_TARGET", FILE_TRANSFER_ASSISTANT) or FILE_TRANSFER_ASSISTANT
+    allowed = allowed_targets()
+    if selected not in allowed:
+        allowed_text = ", ".join(allowed)
+        raise ValueError(f"微信目标不在允许列表中：{selected}；允许：{allowed_text}")
+    return selected
 
 
 def _log_dry_run(target: str, message: str) -> None:
@@ -246,7 +269,10 @@ def _send_file_transfer_message(
     if not message:
         return "error: message must not be empty"
 
-    target = _resolve_target(target)
+    try:
+        target = _resolve_target(target)
+    except ValueError as e:
+        return f"error: {e}"
     if os.environ.get("WECHAT_DRY_RUN", "").strip().lower() in {"1", "true", "yes", "on"}:
         _log_dry_run(target, message)
         return f"sent to {target}: {message}"
@@ -308,14 +334,15 @@ def _send_file_transfer_message(
 
 wechat_file_transfer_tool = Tool(
     name="wechat_file_transfer",
-    description="经本机受控桥接服务向微信发送文本通知。默认发送到文件传输助手；用户明确指定其它微信会话时可传 target。",
+    description="经本机受控桥接服务向微信固定允许列表内的会话发送文本通知。默认发送到文件传输助手。",
     parameters={
         "type": "object",
         "properties": {
             "message": {"type": "string", "description": "要发送的通知文本"},
             "target": {
                 "type": "string",
-                "description": "微信会话名；未提供时使用 WX_FILE_TRANSFER_TARGET 或默认文件传输助手",
+                "enum": allowed_targets(),
+                "description": "微信会话名；只能选择预先允许的固定目标。未提供时使用 WX_FILE_TRANSFER_TARGET 或默认文件传输助手",
             },
             "timeout": {"type": "integer", "description": "请求超时秒数", "default": 15},
         },

@@ -1,3 +1,5 @@
+import json
+
 from agent.context import maybe_compact, truncate_observation
 
 
@@ -61,6 +63,30 @@ def test_compaction_keeps_complete_tool_block():
             "不要重复已完成步骤；如果还需要行动，请继续调用合适工具。"
         ),
     }]
+
+
+def test_compaction_adds_authoritative_task_snapshot(tmp_path):
+    state_dir = tmp_path / ".mini-openclaw"
+    state_dir.mkdir()
+    (state_dir / "tasks.json").write_text(json.dumps({
+        "items": [
+            {"id": "smoke", "title": "冒烟测试", "status": "completed", "result": "ok"},
+            {"id": "notify", "title": "微信通知", "status": "pending", "result": ""},
+        ]
+    }, ensure_ascii=False), encoding="utf-8")
+    messages = [
+        {"role": "system", "content": "system rules"},
+        {"role": "user", "content": "做实验，最后微信通知。" * 100},
+        {"role": "assistant", "content": "已读取配置。"},
+        {"role": "assistant", "content": "全部已经完成，包括微信通知。"},
+    ]
+
+    compacted = maybe_compact(messages, SummaryBackend(), budget=50, workdir=tmp_path)
+
+    assert "权威 task_list 快照" in compacted[0]["content"]
+    assert "notify: 微信通知 [pending]" in compacted[0]["content"]
+    assert "不能声称整体任务已经完成" in compacted[0]["content"]
+    assert "最终答复前必须核对" in compacted[-1]["content"]
 
 
 def test_long_observation_keeps_head_tail_and_archive_location():

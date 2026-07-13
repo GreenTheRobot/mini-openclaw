@@ -6,7 +6,7 @@ from tools.pdf import _wrap_pdf
 from tools.shell import _bash
 from tools.memory import _remember
 from tools.experiment import _experiment_smoke_test
-from tools.wechat import wechat_file_transfer_tool
+from tools.wechat import FILE_TRANSFER_ASSISTANT, _send_file_transfer_message, wechat_file_transfer_tool
 import pytest
 
 
@@ -46,8 +46,15 @@ def test_experiment_cannot_bypass_shell_sandbox():
         _experiment_smoke_test("curl https://attacker.invalid")
 
 
-def test_wechat_schema_does_not_expose_contact_or_token():
+def test_wechat_schema_limits_contacts_and_hides_bridge_controls():
     properties = wechat_file_transfer_tool.parameters["properties"]
-    assert "target" not in properties
+    assert properties["target"]["enum"] == [FILE_TRANSFER_ASSISTANT]
     assert "token" not in properties
     assert "bridge_url" not in properties
+
+
+def test_wechat_rejects_targets_outside_allowlist(monkeypatch):
+    monkeypatch.setenv("WECHAT_DRY_RUN", "1")
+    result = _send_file_transfer_message("hello", target="陌生联系人")
+    assert result.startswith("error:")
+    assert "不在允许列表" in result

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from backend.multimodal import image_block
-from agent.context import estimate_tokens, maybe_compact, truncate_observation
+from agent.context import estimate_tokens, has_open_tasks, maybe_compact, task_state_snapshot, truncate_observation
 from tools.base import ToolRegistry, ToolResult, normalize_tool_result
 from . import permissions
 
@@ -98,6 +98,7 @@ class AgentLoop:
         messages = self.messages
         repeated_calls: Counter[str] = Counter()
         consecutive_errors = 0
+        used_task_list = any(message.get("role") == "tool" and message.get("name") == "task_list" for message in messages)
         if self.tracer:
             self.tracer.log_event("run_start", task=user_task, workdir=str(self.workdir))
 
@@ -122,8 +123,23 @@ class AgentLoop:
                     duration_ms=duration_ms, success=True, note="model_response",
                 )
             if not tool_calls:
-                self._emit("answer", content=assistant.get("content", ""), turn=turn + 1)
                 answer = str(assistant.get("content", "")).strip()
+                if used_task_list and has_open_tasks(self.workdir):
+                    snapshot = task_state_snapshot(self.workdir)
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "你刚才准备给最终答复，但权威 task_list 仍显示有未完成项。\n\n"
+                            f"{snapshot}\n\n"
+                            "请继续执行未完成项；只有所有 task_list 项都不是 pending/in_progress 后，"
+                            "才能给最终完成答复。"
+                        ),
+                    })
+                    self._emit("final_blocked", reason="open_task_list", turn=turn + 1)
+                    if self.tracer:
+                        self.tracer.log_event("final_blocked", reason="open_task_list", turn=turn + 1)
+                    continue
+                self._emit("answer", content=assistant.get("content", ""), turn=turn + 1)
                 self.last_run_status = "success" if answer else "failed"
                 if self.tracer:
                     self.tracer.log_event("run_end", status=self.last_run_status, turns=turn + 1)
@@ -131,6 +147,8 @@ class AgentLoop:
 
             for call in tool_calls:
                 call_name = str(call.get("name", ""))
+                if call_name == "task_list":
+                    used_task_list = True
                 arguments = call.get("arguments")
                 tool = self.registry.get(call_name)
                 success = False
@@ -195,7 +213,7 @@ class AgentLoop:
                         self.tracer.log_event("run_end", status="failed", reason="consecutive_errors")
                     return result
             tokens_before = estimate_tokens(messages)
-            compacted = maybe_compact(messages, self.backend, budget=self.context_budget)
+            compacted = maybe_compact(messages, self.backend, budget=self.context_budget, workdir=self.workdir)
             if compacted is not messages:
                 tokens_after = estimate_tokens(compacted)
                 self._emit("compaction", before=tokens_before, after=tokens_after)

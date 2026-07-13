@@ -1,12 +1,16 @@
 """上下文预算、结构化 compaction 与长 observation 截断。"""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 
 SUMMARY_MAX_CHARS = 3000
 MESSAGE_MAX_CHARS = 1200
 RECENT_MAX_TOKENS = 2000
+TASK_STATE_PATH = Path(".mini-openclaw/tasks.json")
+OPEN_TASK_STATUSES = {"pending", "in_progress"}
 
 
 def estimate_tokens(messages: list[dict[str, Any]]) -> int:
@@ -81,6 +85,56 @@ def _summarize(backend: Any, chunk: list[dict[str, Any]]) -> str:
     return _clip(summary or _fallback_summary(chunk), SUMMARY_MAX_CHARS)
 
 
+def _load_task_items(workdir: str | Path | None = None) -> list[dict[str, Any]]:
+    if workdir is None:
+        return []
+    path = Path(workdir or ".") / TASK_STATE_PATH
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    items = data.get("items")
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def has_open_tasks(workdir: str | Path | None = None) -> bool:
+    return any(str(item.get("status", "")) in OPEN_TASK_STATUSES for item in _load_task_items(workdir))
+
+
+def task_state_snapshot(workdir: str | Path | None = None) -> str:
+    items = _load_task_items(workdir)
+    if not items:
+        return ""
+
+    lines = [
+        "## 权威 task_list 快照",
+        "来源：.mini-openclaw/tasks.json。这个状态优先于模型生成的压缩摘要。",
+    ]
+    open_ids: list[str] = []
+    for item in items:
+        task_id = str(item.get("id", "")).strip() or "(no id)"
+        title = str(item.get("title", "")).strip() or "(no title)"
+        status = str(item.get("status", "")).strip() or "(no status)"
+        result = str(item.get("result", "")).strip()
+        if status in OPEN_TASK_STATUSES:
+            open_ids.append(task_id)
+        line = f"- {task_id}: {title} [{status}]"
+        if result:
+            line += f" result={result}"
+        lines.append(line)
+
+    if open_ids:
+        lines.append(f"未完成任务 id：{', '.join(open_ids)}")
+        lines.append("只要存在 pending 或 in_progress 项，就不能声称整体任务已经完成。")
+    else:
+        lines.append("没有 pending 或 in_progress 的 task_list 项。")
+    return "\n".join(lines)
+
+
 def _recent_window_start(messages: list[dict[str, Any]], recent_turns: int) -> int:
     seen = 0
     for index in range(len(messages) - 1, 0, -1):
@@ -137,7 +191,8 @@ def _safe_recent_suffix(messages: list[dict[str, Any]], max_tokens: int = RECENT
 
 
 def maybe_compact(messages: list[dict[str, Any]], backend: Any,
-                  budget: int = 6000, recent_turns: int = 2) -> list[dict[str, Any]]:
+                  budget: int = 6000, recent_turns: int = 2,
+                  workdir: str | Path | None = None) -> list[dict[str, Any]]:
     if estimate_tokens(messages) <= budget or len(messages) <= 3:
         return messages
     system = messages[0]
@@ -146,7 +201,11 @@ def maybe_compact(messages: list[dict[str, Any]], backend: Any,
     history = messages[1:middle_end]
     if not history and not recent:
         return messages
-    summary = _summarize(backend, history)
+    base_summary = _summarize(backend, history)
+    summary = base_summary
+    task_snapshot = task_state_snapshot(workdir)
+    if task_snapshot:
+        summary = f"{summary.rstrip()}\n\n{task_snapshot}"
     compacted_system = dict(system)
     compacted_system["content"] = (
         str(system.get("content", "")).rstrip()
@@ -155,18 +214,27 @@ def maybe_compact(messages: list[dict[str, Any]], backend: Any,
     )
     compacted = [compacted_system, *recent]
     if not recent or compacted[-1].get("role") != "user":
+        continuation = (
+            "请根据系统消息中的历史压缩备忘和保留的最近上下文继续完成当前任务。"
+            "不要重复已完成步骤；如果还需要行动，请继续调用合适工具。"
+        )
+        if task_snapshot:
+            continuation += (
+                "\n\n最终答复前必须核对系统消息中的权威 task_list 快照；"
+                "如果仍有 pending 或 in_progress 项，请继续执行而不是宣布完成。"
+            )
         compacted.append({
             "role": "user",
-            "content": (
-                "请根据系统消息中的历史压缩备忘和保留的最近上下文继续完成当前任务。"
-                "不要重复已完成步骤；如果还需要行动，请继续调用合适工具。"
-            ),
+            "content": continuation,
         })
     if estimate_tokens(compacted) >= estimate_tokens(messages):
+        clipped_summary = _clip(base_summary, 1000)
+        if task_snapshot:
+            clipped_summary = f"{clipped_summary.rstrip()}\n\n{task_snapshot}"
         compacted_system["content"] = (
             str(system.get("content", "")).rstrip()
             + "\n\n# 历史压缩备忘（必须继续遵循）\n"
-            + _clip(summary, 1000)
+            + clipped_summary
         )
     return compacted
 

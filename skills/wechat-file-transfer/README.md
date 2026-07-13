@@ -7,7 +7,7 @@
 - mini-openclaw 在 WSL 或普通终端里运行。
 - Windows 微信保持登录，并且能被 `wxauto4` 操作。
 - `services/wx_file_transfer_server.py` 使用已安装 `wxauto4` 的 Windows Python 环境启动。
-- Agent 调用内置的 `wechat_file_transfer` 工具，由该工具向桥接服务发送 HTTP 请求。默认目标是文件传输助手；如果用户明确指定其它微信会话，工具会通过 `target` 参数发送到该会话。
+- Agent 调用内置的 `wechat_file_transfer` 工具，由该工具向桥接服务发送 HTTP 请求。默认目标是文件传输助手；如果用户明确指定其它微信会话，工具只会在该会话已由运行环境加入固定允许列表时通过 `target` 参数发送。
 
 ## 需求
 
@@ -155,6 +155,7 @@ Windows 桥接服务环境变量：
 - `WX_BRIDGE_HOST`：监听 host，默认 `0.0.0.0`。
 - `WX_BRIDGE_PORT`：监听端口，默认 `8765`。
 - `WX_FILE_TRANSFER_TARGET`：默认微信会话名，默认 `文件传输助手`。
+- `WX_ALLOWED_TARGETS`：Agent 可发送的额外固定微信会话名，使用逗号或分号分隔；未配置时只允许 `文件传输助手`。
 - `WX_BRIDGE_TOKEN`：可选共享 token。
 - `WX_BRIDGE_CERTFILE`：可选 TLS 证书文件。
 - `WX_BRIDGE_KEYFILE`：可选 TLS 私钥文件。
@@ -163,7 +164,8 @@ Windows 桥接服务环境变量：
 
 - `WX_BRIDGE_URL`：桥接服务基础 URL。未设置时，工具会自动探测本地 WSL/Windows 路由。
 - `WX_BRIDGE_TOKEN`：可选 token，会作为 `X-OpenClaw-Token` 请求头发送。
-- `WX_FILE_TRANSFER_TARGET`：可选默认发送目标，默认 `文件传输助手`。如果工具调用传入 `target`，则以 `target` 为准。
+- `WX_FILE_TRANSFER_TARGET`：可选默认发送目标，默认 `文件传输助手`；该目标会自动加入允许列表。
+- `WX_ALLOWED_TARGETS`：可选额外允许发送目标，使用逗号或分号分隔。工具调用传入 `target` 时，目标必须属于 `文件传输助手`、`WX_FILE_TRANSFER_TARGET` 或 `WX_ALLOWED_TARGETS`。
 - `WECHAT_DRY_RUN`：设为 `1`、`true`、`yes` 或 `on` 时启用 dry-run。Agent 仍正常调用 `wechat_file_transfer`，但工具不会连接微信桥接服务，只会在命令行 stderr 打印目标和消息内容，并向 Agent 返回与真实发送成功相同的结果。
 - `WECHAT_BRIDGE_START_CMD`：可选自动启动命令。未设置时使用项目内置的 `services\wechat_bridge\start.ps1`；设置后覆盖默认命令。
 - `WECHAT_BRIDGE_PYTHON`：可选 Windows Python 3.12 路径，用于创建 `services\wechat_bridge\.venv`。未设置时脚本会自动查找常见 Python 3.12 命令和安装路径；找不到时尝试用 `winget` 安装。

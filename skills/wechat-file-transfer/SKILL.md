@@ -11,7 +11,7 @@ description: "当用户要求通过微信、文件传输助手、wxauto、Window
 
 1. 先确认要发送的精确文本。
 2. 调用 `wechat_file_transfer` 工具，并传入 `message`。
-3. 如果用户明确指定了其它微信会话名，同时传入 `target`；否则不传 `target`，使用默认目标 `文件传输助手`。
+3. 只能发送到工具 schema 中 `target.enum` 列出的固定允许目标；如果用户明确指定了允许列表内的其它微信会话名，同时传入 `target`；否则不传 `target`，使用默认目标 `文件传输助手`。
 4. 如果桥接服务无法连接，工具会优先尝试通过默认 PowerShell 脚本自动启动 Windows 侧服务；用户设置 `WECHAT_BRIDGE_START_CMD` 时工具自动使用该命令覆盖默认启动方式。
 5. 不要调用 `bash` 使用 `curl`、`wget`、`ps aux | grep` 等命令探测或启动微信 bridge；这些外联/进程探测组合会被 shell 沙箱拒绝。bridge 的启动和健康检查交给 `wechat_file_transfer` 工具内部处理。
 6. bridge 由工具自动管理和启动。若自动启动失败，显式提示用户登录微信客户端、确认 `winget` 或 Windows Python 3.12 可用，并给出这个手动启动命令：
