@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 from agent.loop import AgentLoop
@@ -482,6 +483,122 @@ def test_loop_reuses_successful_identical_fetch_observation(tmp_path: Path):
     assert loop.run("read the project page") == "final report from reused observation"
     assert calls["count"] == 1
     assert any("已复用此前相同调用" in str(message.get("content", "")) for message in seen_messages[-1])
+
+
+def test_recent_literature_web_search_is_routed_to_arxiv(tmp_path: Path):
+    seen_messages = []
+    calls = {"web": 0, "arxiv": []}
+
+    class LiteratureBackend:
+        def __init__(self):
+            self.turn = 0
+
+        def chat(self, messages, tools=None):
+            seen_messages.append([dict(message) for message in messages])
+            self.turn += 1
+            if self.turn == 1:
+                return {"content": "", "tool_calls": [{
+                    "id": "search-1",
+                    "name": "web_search",
+                    "arguments": {"query": "recent multimodal compression papers", "max_results": 5},
+                }]}
+            return {
+                "content": (
+                    "最近一周论文检索报告\n"
+                    "提交日期区间：本周。严格匹配 1 篇。\n"
+                    "标题：Efficient Multimodal Compression\n"
+                    "摘要：研究视觉 token 压缩。\n"
+                    "解决问题：多模态模型推理成本。\n"
+                    "核心方法：筛选视觉 token 并保留跨模态交互。\n"
+                    "来源：https://arxiv.org/abs/2607.12345"
+                ),
+                "tool_calls": [],
+            }
+
+    def fake_web_search(**kwargs):
+        calls["web"] += 1
+        return "should not be used"
+
+    def fake_arxiv_search(**kwargs):
+        calls["arxiv"].append(kwargs)
+        return "arXiv paper metadata with source link"
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "web_search", "", {
+            "type": "object",
+            "properties": {"query": {"type": "string"}, "max_results": {"type": "integer"}},
+            "required": ["query"],
+        },
+        fake_web_search,
+    ))
+    registry.register(Tool(
+        "arxiv_search", "", {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "start_date": {"type": "string"},
+                "end_date": {"type": "string"},
+                "max_results": {"type": "integer"},
+            },
+            "required": ["query"],
+        },
+        fake_arxiv_search,
+    ))
+
+    loop = AgentLoop(LiteratureBackend(), registry, "system", workdir=tmp_path, auto_approve=True)
+    answer = loop.run("帮我找最近一周多模态压缩论文")
+
+    assert "https://arxiv.org/abs/2607.12345" in answer
+    assert calls["web"] == 0
+    assert len(calls["arxiv"]) == 1
+    assert calls["arxiv"][0]["end_date"] == date.today().isoformat()
+    assert calls["arxiv"][0]["max_results"] == 5
+    assert any("自动从 web_search 路由到 arxiv_search" in str(message.get("content", "")) for message in seen_messages[-1])
+
+
+def test_direct_url_web_search_is_routed_to_fetch(tmp_path: Path):
+    seen_messages = []
+    calls = {"web": 0, "fetch": []}
+
+    class UrlBackend:
+        def __init__(self):
+            self.turn = 0
+
+        def chat(self, messages, tools=None):
+            seen_messages.append([dict(message) for message in messages])
+            self.turn += 1
+            if self.turn == 1:
+                return {"content": "", "tool_calls": [{
+                    "id": "search-1",
+                    "name": "web_search",
+                    "arguments": {"query": "https://example.com/project"},
+                }]}
+            return {"content": "已读取页面：https://example.com/project", "tool_calls": []}
+
+    def fake_web_search(**kwargs):
+        calls["web"] += 1
+        return "should not be used"
+
+    def fake_fetch(**kwargs):
+        calls["fetch"].append(kwargs)
+        return "example project page"
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "web_search", "", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        fake_web_search,
+    ))
+    registry.register(Tool(
+        "web_fetch", "", {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+        fake_fetch,
+    ))
+
+    loop = AgentLoop(UrlBackend(), registry, "system", workdir=tmp_path, auto_approve=True)
+    assert loop.run("读取这个地址 https://example.com/project") == "已读取页面：https://example.com/project"
+    assert calls["web"] == 0
+    assert calls["fetch"] == [{"url": "https://example.com/project"}]
+    assert any("自动从 web_search 路由到 web_fetch" in str(message.get("content", "")) for message in seen_messages[-1])
 
 
 def test_loop_warns_against_network_probe_through_bash(tmp_path: Path):
