@@ -184,6 +184,9 @@ def check(tool: str, args: dict[str, Any], workdir: Path, *, mode: str = "defaul
             return PermissionDecision("allow", decision.reason)
         return decision
     if tool in EXTERNAL_SEND:
+        from tools.wechat import is_trusted_target
+        if tool == "wechat_file_transfer" and is_trusted_target(args.get("target")):
+            return PermissionDecision("allow", "微信目标在受信任联系人列表内，可直接发送")
         return PermissionDecision("confirm", "请求真实发送微信消息，必须逐次确认接收方和正文")
     if tool in EXPERIMENT_READ:
         return PermissionDecision("allow", "读取工作目录内实验状态")

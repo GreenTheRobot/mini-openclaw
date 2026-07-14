@@ -50,6 +50,22 @@ def allowed_targets() -> list[str]:
     return targets
 
 
+def trusted_targets() -> list[str]:
+    targets = [FILE_TRANSFER_ASSISTANT]
+    for target in _split_targets(os.environ.get("WX_TRUSTED_TARGETS", "")):
+        if target not in targets:
+            targets.append(target)
+    return targets
+
+
+def is_trusted_target(target: str | None = None) -> bool:
+    try:
+        selected = _resolve_target(target)
+    except ValueError:
+        return False
+    return selected in trusted_targets()
+
+
 def _resolve_target(target: str | None = None) -> str:
     selected = target or os.environ.get("WX_FILE_TRANSFER_TARGET", FILE_TRANSFER_ASSISTANT) or FILE_TRANSFER_ASSISTANT
     allowed = allowed_targets()

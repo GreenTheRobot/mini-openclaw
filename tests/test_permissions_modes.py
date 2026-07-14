@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from agent.permissions import ConfirmationResponse, PermissionManager, check
+import pytest
+
+from agent.permissions import PermissionManager, check
 
 
 def test_permission_modes_have_distinct_write_and_execution_behavior(tmp_path: Path):
@@ -11,8 +13,8 @@ def test_permission_modes_have_distinct_write_and_execution_behavior(tmp_path: P
     assert check("write", args, tmp_path, mode="auto-safe").verdict == "allow"
     assert check("bash", {"command": "python -V"}, tmp_path, mode="auto-safe").verdict == "confirm"
     assert check("wechat_file_transfer", {"message": "x", "dry_run": True}, tmp_path, mode="auto-safe").verdict == "allow"
-    assert check("wechat_file_transfer", {"message": "x", "dry_run": False}, tmp_path, mode="auto-safe").verdict == "confirm"
-    assert check("wechat_file_transfer", {"message": "x"}, tmp_path, mode="auto-safe").verdict == "confirm"
+    assert check("wechat_file_transfer", {"message": "x", "dry_run": False}, tmp_path, mode="auto-safe").verdict == "allow"
+    assert check("wechat_file_transfer", {"message": "x"}, tmp_path, mode="auto-safe").verdict == "allow"
 
 
 def test_network_grants_are_scoped_to_exact_tool_and_hostname(tmp_path: Path):
@@ -47,6 +49,34 @@ def test_task_grant_expires_but_session_grant_persists(tmp_path: Path):
 
 def test_plan_denies_unknown_external_tools(tmp_path: Path):
     assert check("mcp__unknown", {}, tmp_path, mode="plan").verdict == "deny"
+
+
+def test_wechat_requires_confirmation_for_untrusted_allowed_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("WX_ALLOWED_TARGETS", "project-group")
+    monkeypatch.delenv("WX_TRUSTED_TARGETS", raising=False)
+
+    decision = check(
+        "wechat_file_transfer",
+        {"message": "x", "target": "project-group"},
+        tmp_path,
+        mode="auto-safe",
+    )
+
+    assert decision.verdict == "confirm"
+
+
+def test_wechat_allows_trusted_allowed_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("WX_ALLOWED_TARGETS", "project-group")
+    monkeypatch.setenv("WX_TRUSTED_TARGETS", "project-group")
+
+    decision = check(
+        "wechat_file_transfer",
+        {"message": "x", "target": "project-group"},
+        tmp_path,
+        mode="auto-safe",
+    )
+
+    assert decision.verdict == "allow"
 
 
 def test_glob_permission_allows_relative_path_and_rejects_escape(tmp_path: Path):

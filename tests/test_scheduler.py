@@ -73,9 +73,10 @@ def test_open_todo_is_not_treated_as_completed(tmp_path: Path):
     assert state["path"] == ".mini-openclaw/run.tasks.json"
 
 
-def test_cron_wakeup_is_idempotent_and_project_scoped(tmp_path: Path):
+def test_cron_wakeup_is_idempotent_and_project_scoped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     cron = FakeCron()
     which = lambda name: "/usr/bin/crontab" if name == "crontab" else None
+    monkeypatch.setattr(scheduler, "_read_crontab", lambda runner, which: cron.content)
 
     first = install_wakeup(root=tmp_path, runner=cron, which=which)
     second = install_wakeup(root=tmp_path, runner=cron, which=which)
@@ -130,7 +131,10 @@ def test_schedule_add_rolls_back_if_wakeup_installation_fails(tmp_path: Path, mo
 def test_scheduled_run_without_a_todo_trail_is_incomplete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (tmp_path / "research").mkdir()
 
+    seen = {}
+
     def successful_cli(*args, **kwargs):
+        seen["command"] = args[0]
         return SimpleNamespace(returncode=0, stdout="placeholder backend", stderr="")
 
     monkeypatch.setattr(scheduler.subprocess, "run", successful_cli)
@@ -138,6 +142,7 @@ def test_scheduled_run_without_a_todo_trail_is_incomplete(tmp_path: Path, monkey
         "id": "missing-todo",
         "workdir": "research",
         "prompt": "create and complete a TODO",
+        "python_executable": "/tmp/custom-venv/bin/python",
         "permission_mode": "plan",
         "timeout_seconds": 10,
     }, tmp_path)
@@ -145,3 +150,47 @@ def test_scheduled_run_without_a_todo_trail_is_incomplete(tmp_path: Path, monkey
     assert result["returncode"] == 0
     assert result["todo"]["present"] is False
     assert result["status"] == "incomplete"
+    assert seen["command"][0] == "/tmp/custom-venv/bin/python"
+
+
+def test_added_schedule_captures_preferred_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    (tmp_path / "research").mkdir()
+    monkeypatch.setenv("VIRTUAL_ENV", "/home/test/openclaw")
+
+    spec = add_schedule(
+        "weekly review", "整理本周论文", "once", "2099-01-01T10:00:00+08:00",
+        root=tmp_path, schedule_id="weekly-review-python", workdir="research",
+    )
+
+    assert spec["python_executable"] == scheduler._venv_python("/home/test/openclaw")
+
+
+def test_scheduled_run_falls_back_to_env_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    (tmp_path / "research").mkdir()
+    seen = {}
+
+    def successful_cli(*args, **kwargs):
+        seen["command"] = args[0]
+        return SimpleNamespace(returncode=0, stdout="placeholder backend", stderr="")
+
+    monkeypatch.setenv("MINI_OPENCLAW_PYTHON", "/home/test/openclaw/bin/python")
+    monkeypatch.setattr(scheduler.subprocess, "run", successful_cli)
+    result = scheduler._execute({
+        "id": "missing-python-field",
+        "workdir": "research",
+        "prompt": "run with env python",
+        "permission_mode": "plan",
+        "timeout_seconds": 10,
+    }, tmp_path)
+
+    assert result["returncode"] == 0
+    assert seen["command"][0] == "/home/test/openclaw/bin/python"
+
+
+def test_cron_block_prefers_env_python(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.setenv("MINI_OPENCLAW_PYTHON", "/home/test/openclaw/bin/python")
+
+    block = scheduler._cron_block(tmp_path)
+
+    assert "/home/test/openclaw/bin/python" in block
+    assert "MINI_OPENCLAW_PYTHON" in block

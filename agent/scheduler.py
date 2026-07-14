@@ -23,6 +23,44 @@ LOCK_PATH = Path(".mini-openclaw/scheduler.lock")
 WAKEUP_LOG_PATH = Path(".mini-openclaw/scheduler-wakeup.log")
 
 
+def _current_python() -> str:
+    return str(Path(sys.executable).resolve())
+
+
+def _venv_python(venv: str) -> str:
+    root = Path(venv)
+    if os.name == "nt":
+        return str(root / "Scripts" / "python.exe")
+    return str(root / "bin" / "python")
+
+
+def _preferred_python_env() -> str:
+    explicit = os.environ.get("MINI_OPENCLAW_PYTHON", "").strip()
+    if explicit:
+        return explicit
+    venv = os.environ.get("VIRTUAL_ENV", "").strip()
+    if venv:
+        return _venv_python(venv)
+    return _current_python()
+
+
+def _resolve_task_python(spec: dict[str, Any], root: Path) -> str:
+    explicit = str(spec.get("python_executable") or "").strip()
+    if explicit:
+        return explicit
+    env_python = os.environ.get("MINI_OPENCLAW_PYTHON", "").strip()
+    if env_python:
+        return env_python
+    venv = os.environ.get("VIRTUAL_ENV", "").strip()
+    if venv:
+        return _venv_python(venv)
+    for relative in (".venv", "venv"):
+        candidate_root = root / relative
+        if candidate_root.exists():
+            return _venv_python(str(candidate_root))
+    return _current_python()
+
+
 def _now(timezone: str) -> datetime:
     return datetime.now(ZoneInfo(timezone))
 
@@ -107,13 +145,13 @@ def _cron_escape(value: str) -> str:
 
 def _cron_block(root: Path) -> str:
     begin, end = _cron_markers(root)
-    python = shlex.quote(str(Path(sys.executable).resolve()))
+    python = shlex.quote(_preferred_python_env())
     project = shlex.quote(str(root.resolve()))
     log = shlex.quote(str((root / WAKEUP_LOG_PATH).resolve()))
     command = _cron_escape(
         f"cd {project} && "
         "if [ -f .env ]; then set -a; . ./.env; set +a; fi; "
-        f"{python} -m agent.scheduler run-due >> {log} 2>&1"
+        f"\"${{MINI_OPENCLAW_PYTHON:-{python}}}\" -m agent.scheduler run-due >> {log} 2>&1"
     )
     return f"{begin}\n* * * * * {command}\n{end}\n"
 
@@ -253,6 +291,7 @@ def add_schedule(
         "name": name.strip(),
         "prompt": prompt.strip(),
         "workdir": relative_workdir,
+        "python_executable": _preferred_python_env(),
         "schedule_type": schedule_type,
         "expression": expression.strip(),
         "interval_minutes": interval_minutes,
@@ -346,7 +385,7 @@ def _execute(spec: dict[str, Any], root: Path) -> dict[str, Any]:
     trace_path = run_dir / f"{run_id}.trace.jsonl"
     trace_relative = trace_path.relative_to(workdir).as_posix()
     command = [
-        sys.executable, "-m", "agent.cli", spec["prompt"],
+        _resolve_task_python(spec, root), "-m", "agent.cli", spec["prompt"],
         "--permission-mode", spec["permission_mode"],
         "--no-mcp", "--trace", trace_relative,
     ]
