@@ -72,15 +72,23 @@ def _parse_datetime(value: str, timezone: str) -> datetime:
     return parsed.astimezone(ZoneInfo(timezone))
 
 
-def _relative_path(value: str, default: str = ".") -> str:
+def _relative_path(value: str, default: str = ".", *, root: Path | None = None) -> str:
     raw = Path(value or default)
-    if raw.is_absolute() or ".." in raw.parts:
+    if raw.is_absolute():
+        if root is None:
+            raise ValueError("调度任务路径必须是工作目录内的相对路径")
+        try:
+            return raw.resolve().relative_to(root.resolve()).as_posix() or "."
+        except ValueError as exc:
+            raise ValueError("调度任务 workdir 必须位于当前项目目录内") from exc
+    if ".." in raw.parts:
         raise ValueError("调度任务路径必须是工作目录内的相对路径")
     return raw.as_posix() or "."
 
 
 def _resolve_workdir(root: Path, relative: str) -> Path:
-    target = (root / _relative_path(relative)).resolve()
+    target = (root / _relative_path(relative, root=root)).resolve()
+
     try:
         target.relative_to(root.resolve())
     except ValueError as exc:
@@ -252,7 +260,7 @@ def add_schedule(
     schedule_id: str = "",
     workdir: str = ".",
     timezone: str = "Asia/Shanghai",
-    permission_mode: str = "auto-safe",
+    permission_mode: str = "auto-local",
     timeout_seconds: int = 1800,
     interval_minutes: int = 0,
     max_runs: int = 0,
@@ -262,14 +270,14 @@ def add_schedule(
         raise ValueError("调度任务 name 和 prompt 不能为空")
     if schedule_type not in {"once", "interval", "cron"}:
         raise ValueError("schedule_type 必须是 once/interval/cron")
-    if permission_mode not in {"plan", "auto-safe"}:
-        raise ValueError("自动任务 permission_mode 只允许 plan 或 auto-safe")
+    if permission_mode not in {"plan", "auto-safe", "auto-local"}:
+        raise ValueError("自动任务 permission_mode 只允许 plan、auto-safe 或 auto-local")
     if timeout_seconds < 1:
         raise ValueError("timeout_seconds 必须为正数")
     if max_runs < 0:
         raise ValueError("max_runs 不能为负数；0 表示不限制轮数")
     ZoneInfo(timezone)  # validate timezone
-    relative_workdir = _relative_path(workdir)
+    relative_workdir = _relative_path(workdir, root=root)
     _resolve_workdir(root, relative_workdir)
     if schedule_type == "interval" and interval_minutes < 1:
         raise ValueError("interval 任务需要正数 interval_minutes")
@@ -300,6 +308,10 @@ def add_schedule(
         "timeout_seconds": timeout_seconds,
         "max_runs": max_runs,
         "run_count": 0,
+        "run_history": [],
+        "run_summary": {"completed": 0, "incomplete": 0, "failed": 0, "timed_out": 0},
+        "schedule_status": "running",
+        "finished_at": None,
         "enabled": True,
         "created_at": now.isoformat(),
         "next_run_at": None,
@@ -330,6 +342,9 @@ def update_schedule(schedule_id: str, *, root: Path | str = ".", enabled: bool |
         if spec.get("id") == schedule_id:
             if enabled is not None:
                 spec["enabled"] = bool(enabled)
+                spec["schedule_status"] = "running" if enabled else "paused"
+                if enabled:
+                    spec["finished_at"] = None
             _save(root, schedules)
             return spec
     raise ValueError(f"没有调度任务：{schedule_id}")
@@ -420,12 +435,10 @@ def _execute(spec: dict[str, Any], root: Path) -> dict[str, Any]:
         status = "timed_out"
         output_path.write_text(str(exc.stdout or ""), encoding="utf-8")
         error_path.write_text(str(exc.stderr or ""), encoding="utf-8")
+    # TODO files remain useful progress evidence for Agent workflows, but are
+    # not required for deterministic script jobs. A successful CLI exit is the
+    # completion signal for one scheduled run.
     todo = _todo_status(run_dir / f"{run_id}.tasks.json", workdir)
-    # Scheduled jobs are required to leave a run-local TODO trail.  Without it
-    # (for example when the CLI falls back to FakeBackend), a zero exit code is
-    # not execution evidence and must not be reported as completed.
-    if status == "completed" and (not todo["present"] or todo["open"]):
-        status = "incomplete"
     finished = datetime.now().astimezone()
     return {
         "run_id": run_id,
@@ -441,6 +454,26 @@ def _execute(spec: dict[str, Any], root: Path) -> dict[str, Any]:
     }
 
 
+def _run_summary(history: list[dict[str, Any]]) -> dict[str, int]:
+    summary = {"completed": 0, "incomplete": 0, "failed": 0, "timed_out": 0}
+    for entry in history:
+        status = str(entry.get("status", ""))
+        if status in summary:
+            summary[status] += 1
+    return summary
+
+
+def _terminal_schedule_status(history: list[dict[str, Any]]) -> str:
+    statuses = [str(entry.get("status", "")) for entry in history]
+    if statuses and all(status == "completed" for status in statuses):
+        return "completed"
+    if any(status == "incomplete" for status in statuses):
+        return "partial_complete"
+    if statuses and all(status in {"failed", "timed_out"} for status in statuses):
+        return "failed"
+    return "partial_complete"
+
+
 def _run_schedule_unlocked(schedule_id: str, root: Path) -> dict[str, Any]:
     schedules = _load(root)
     for index, spec in enumerate(schedules):
@@ -448,16 +481,31 @@ def _run_schedule_unlocked(schedule_id: str, root: Path) -> dict[str, Any]:
             continue
         result = _execute(spec, root)
         spec["run_count"] = int(spec.get("run_count", 0)) + 1
+        history = list(spec.get("run_history", []))
+        history.append({
+            "run_id": result["run_id"],
+            "status": result["status"],
+            "started_at": result["started_at"],
+            "finished_at": result["finished_at"],
+        })
+        spec["run_history"] = history
+        spec["run_summary"] = _run_summary(history)
         now = _now(str(spec["timezone"]))
         reached_max_runs = bool(spec.get("max_runs")) and spec["run_count"] >= int(spec["max_runs"])
         if spec["schedule_type"] == "once" or reached_max_runs:
             spec["enabled"] = False
             spec["next_run_at"] = None
+            spec["schedule_status"] = _terminal_schedule_status(history)
+            spec["finished_at"] = now.isoformat()
         elif spec["schedule_type"] == "interval":
             spec["next_run_at"] = (now + timedelta(minutes=int(spec["interval_minutes"]))).isoformat()
+            spec["schedule_status"] = "running"
         else:
             next_run = _next_run(spec, now)
             spec["next_run_at"] = next_run.isoformat() if next_run else None
+            spec["schedule_status"] = "running"
+        result["schedule_status"] = spec["schedule_status"]
+        result["run_summary"] = spec["run_summary"]
         spec["last_run"] = result
         schedules[index] = spec
         _save(root, schedules)

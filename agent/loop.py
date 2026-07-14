@@ -159,7 +159,7 @@ class AgentLoop:
     }
 
     def __init__(self, backend: Any, registry: ToolRegistry, system_prompt: str,
-                 max_turns: int = 20, workdir: str | Path | None = None,
+                 max_turns: int = 30, workdir: str | Path | None = None,
                  auto_approve: bool = False,
                  confirm_callback: Callable[[str, dict[str, Any], permissions.PermissionDecision], bool] | None = None,
                  tracer: Any | None = None, max_consecutive_errors: int = 4,

@@ -36,7 +36,7 @@
 
 ### 子 Agent 上下文结构
 
-每个子 agent 都是一个新的 `AgentLoop` 实例，不直接继承父 agent 的完整 `messages` 历史。它拥有独立的消息列表、`Tracer`、`PermissionManager`、TODO 文件、工具子集和 `max_turns=8` 的执行预算。子 agent 的 system prompt 由主 CLI 的 `system_prompt` 加对应角色提示组成，例如 Research Agent 会收到通用系统约束、运行时日期、权限规则和 Skills catalog，再追加 `RESEARCH_PROMPT`。
+每个子 agent 都是一个新的 `AgentLoop` 实例，不直接继承父 agent 的完整 `messages` 历史。它拥有独立的消息列表、`Tracer`、`PermissionManager`、TODO 文件、工具子集和 `max_turns=30` 的执行预算。子 agent 的 system prompt 由主 CLI 的 `system_prompt` 加对应角色提示组成，例如 Research Agent 会收到通用系统约束、运行时日期、权限规则和 Skills catalog，再追加 `RESEARCH_PROMPT`。
 
 子 agent 的 user message 会包装原始任务和主 Agent 分配的具体工作，而不是复制父会话历史：
 

@@ -230,7 +230,7 @@ def _show_help() -> None:
 
 - `/help`：显示帮助
 - `/tools`：列出当前工具
-- `/mode [plan|default|accept-edits|auto-safe]`：查看或切换权限模式
+- `/mode [plan|default|accept-edits|auto-safe|auto-local]`：查看或切换权限模式
 - `/permissions [clear]`：查看或清空临时授权
 - `/steps`：查看上一轮可观察工具步骤（含子 agent）
 - `/verbose on|off`：切换简洁/详细过程显示
@@ -273,6 +273,7 @@ def _show_modes(current: str) -> None:
 - `default`：读操作自动允许；网络按域名授权；写入和执行逐次确认
 - `accept-edits`：工作目录内 write/edit 自动允许，其余敏感操作仍确认
 - `auto-safe`：白名单网络读取、受控 PDF 下载和工作区编辑自动允许；bash、实验执行和外部发送仍确认
+- `auto-local`：工作目录内读写、本地 bash、网页读取与受控下载自动允许，适合非交互定时任务；未受信任的外部发送仍确认
 
 当前模式：`{current}`
 """)

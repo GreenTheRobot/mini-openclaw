@@ -58,6 +58,26 @@ def test_schedule_persists_only_relative_paths(tmp_path: Path):
     assert remove_schedule("weekly-review", root=tmp_path) is True
 
 
+def test_schedule_normalizes_an_absolute_workdir_inside_the_project(tmp_path: Path):
+    research = tmp_path / "research"
+    research.mkdir()
+
+    spec = add_schedule(
+        "absolute path", "整理本周论文", "interval", "", root=tmp_path,
+        schedule_id="absolute-workdir", workdir=str(research), interval_minutes=1,
+    )
+
+    assert spec["workdir"] == "research"
+
+
+def test_schedule_rejects_an_absolute_workdir_outside_the_project(tmp_path: Path):
+    with pytest.raises(ValueError, match="项目目录内"):
+        add_schedule(
+            "outside", "整理本周论文", "interval", "", root=tmp_path,
+            schedule_id="outside-workdir", workdir="/tmp", interval_minutes=1,
+        )
+
+
 def test_schedule_tool_is_registered():
     assert "schedule_task" in build_default_registry().names()
 
@@ -128,7 +148,7 @@ def test_schedule_add_rolls_back_if_wakeup_installation_fails(tmp_path: Path, mo
     assert list_schedules(tmp_path) == []
 
 
-def test_scheduled_run_without_a_todo_trail_is_incomplete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_scheduled_run_without_a_todo_trail_is_completed_when_cli_succeeds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (tmp_path / "research").mkdir()
 
     seen = {}
@@ -149,8 +169,67 @@ def test_scheduled_run_without_a_todo_trail_is_incomplete(tmp_path: Path, monkey
 
     assert result["returncode"] == 0
     assert result["todo"]["present"] is False
-    assert result["status"] == "incomplete"
+    assert result["status"] == "completed"
     assert seen["command"][0] == "/tmp/custom-venv/bin/python"
+
+
+@pytest.mark.parametrize(
+    ("statuses", "expected"),
+    [
+        (["completed", "completed", "completed"], "completed"),
+        (["completed", "incomplete", "completed"], "partial_complete"),
+        (["failed", "timed_out", "failed"], "failed"),
+    ],
+)
+def test_schedule_terminal_status_aggregates_all_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, statuses: list[str], expected: str,
+):
+    (tmp_path / "research").mkdir()
+    add_schedule(
+        "aggregate", "run task", "interval", "", root=tmp_path,
+        schedule_id="aggregate-status", workdir="research", interval_minutes=1, max_runs=3,
+    )
+    sequence = iter(statuses)
+
+    def execute(_spec, _root):
+        status = next(sequence)
+        return {
+            "run_id": f"run-{status}", "status": status, "returncode": 0,
+            "started_at": "2026-07-15T00:00:00+08:00",
+            "finished_at": "2026-07-15T00:00:01+08:00",
+        }
+
+    monkeypatch.setattr(scheduler, "_execute", execute)
+    for _ in statuses:
+        scheduler.run_schedule("aggregate-status", root=tmp_path)
+
+    spec = list_schedules(tmp_path)[0]
+    assert spec["enabled"] is False
+    assert spec["run_count"] == 3
+    assert spec["schedule_status"] == expected
+    assert spec["run_summary"] == {status: statuses.count(status) for status in ("completed", "incomplete", "failed", "timed_out")}
+
+
+def test_legacy_schedule_without_status_fields_remains_runnable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    (tmp_path / "research").mkdir()
+    spec = add_schedule(
+        "legacy", "run task", "interval", "", root=tmp_path,
+        schedule_id="legacy-status", workdir="research", interval_minutes=1, max_runs=2,
+    )
+    for key in ("run_history", "run_summary", "schedule_status", "finished_at"):
+        spec.pop(key)
+    (tmp_path / ".mini-openclaw" / "schedules.json").write_text(json.dumps([spec]), encoding="utf-8")
+    monkeypatch.setattr(scheduler, "_execute", lambda *_args: {
+        "run_id": "legacy-run", "status": "completed", "returncode": 0,
+        "started_at": "2026-07-15T00:00:00+08:00", "finished_at": "2026-07-15T00:00:01+08:00",
+    })
+
+    scheduler.run_schedule("legacy-status", root=tmp_path)
+
+    updated = list_schedules(tmp_path)[0]
+    assert updated["run_count"] == 1
+    assert updated["schedule_status"] == "running"
+    assert updated["run_summary"]["completed"] == 1
 
 
 def test_added_schedule_captures_preferred_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

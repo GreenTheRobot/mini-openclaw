@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-PERMISSION_MODES = ("plan", "default", "accept-edits", "auto-safe")
+PERMISSION_MODES = ("plan", "default", "accept-edits", "auto-safe", "auto-local")
 WRITE = {"write", "edit"}
 EXEC = {"bash"}
 NETWORK_READ = {"arxiv_search", "web_search", "web_fetch"}
@@ -82,10 +82,12 @@ def _glob_decision(args: dict[str, Any], workdir: Path) -> PermissionDecision:
     return PermissionDecision("allow", f"glob 限定在工作目录子目录：{raw_path}")
 
 
-def _bash_decision(args: dict[str, Any]) -> PermissionDecision:
+def _bash_decision(args: dict[str, Any], *, allow_unattended: bool = False) -> PermissionDecision:
     command = str(args.get("command", "")).strip()
     if not command:
         return PermissionDecision("deny", "缺少 command 参数")
+    if allow_unattended:
+        return PermissionDecision("allow", "auto-local 模式允许非交互本地 shell 命令")
     return PermissionDecision("confirm", "shell 命令需要确认后执行")
 
 
@@ -170,17 +172,17 @@ def check(tool: str, args: dict[str, Any], workdir: Path, *, mode: str = "defaul
         return PermissionDecision("deny", f"plan 模式禁止执行会产生副作用的工具：{tool}")
 
     if tool in WRITE:
-        return _path_decision(args, workdir, confirm=mode not in {"accept-edits", "auto-safe"})
+        return _path_decision(args, workdir, confirm=mode not in {"accept-edits", "auto-safe", "auto-local"})
     if tool in EXEC:
-        return _bash_decision(args)
+        return _bash_decision(args, allow_unattended=mode == "auto-local")
     if tool in NETWORK_READ:
         decision = _network_decision(tool, args)
-        if mode == "auto-safe" and decision.verdict == "confirm":
+        if mode in {"auto-safe", "auto-local"} and decision.verdict == "confirm":
             return PermissionDecision("allow", decision.reason)
         return decision
     if tool in DOWNLOAD:
         decision = _download_decision(args, workdir)
-        if mode == "auto-safe" and decision.verdict == "confirm":
+        if mode in {"auto-safe", "auto-local"} and decision.verdict == "confirm":
             return PermissionDecision("allow", decision.reason)
         return decision
     if tool in EXTERNAL_SEND:
