@@ -135,7 +135,7 @@ def _remove_cron_block(content: str, root: Path) -> str:
 
 
 def _read_crontab(runner: Any = subprocess.run, which: Any = shutil.which) -> str:
-    if os.name != "posix" or not which("crontab"):
+    if not which("crontab"):
         raise RuntimeError("当前平台未提供用户级 crontab；请改用 systemd timer 或手动运行 run-due")
     result = runner(["crontab", "-l"], capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode == 0:

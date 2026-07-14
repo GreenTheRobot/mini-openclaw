@@ -16,6 +16,14 @@ from agent.sanitize import sanitize_for_json
 from eval.tracer import Tracer
 from tools.base import ToolRegistry
 
+NO_ASSIGNMENT_VALUES = {
+    "", "不需要", "无需", "无", "没有", "否", "不用", "不必",
+    "none", "no", "n/a", "na", "not needed", "not required",
+}
+RUNTIME_HINT_RE = re.compile(
+    r"(# 运行时日期\s*\n.*?不得用旧年份搜索结果冒充近期结果。)",
+    flags=re.S,
+)
 
 ORCHESTRATION_PROMPT = """你是主 Agent，负责把控全局，而不是亲自完成所有细节。
 你要先判断当前任务是否真的需要子 agent。简单、单步、无需跨角色协作的任务应由主 Agent 直接完成；复杂任务、需要并行证据、代码实验、论文/图表多源分析或用户明确要求子 agent 时，才启用子 agent。
@@ -157,12 +165,26 @@ def _fallback_orchestration(task: str, image_paths: list[str]) -> dict[str, Any]
     }
 
 
-def _orchestration_plan(backend: Any, task: str, image_paths: list[str]) -> dict[str, Any]:
+def _normalize_assignment(value: Any) -> str:
+    text = str(value or "").strip()
+    if text.strip("。.!！ ").lower() in NO_ASSIGNMENT_VALUES:
+        return ""
+    return text
+
+
+def _runtime_hint(system_prompt: str) -> str:
+    match = RUNTIME_HINT_RE.search(system_prompt)
+    return match.group(1).strip() if match else ""
+
+
+def _orchestration_plan(backend: Any, task: str, image_paths: list[str], system_prompt: str = "") -> dict[str, Any]:
+    runtime_hint = _runtime_hint(system_prompt)
     response = backend.chat([
         {"role": "system", "content": ORCHESTRATION_PROMPT},
         {"role": "user", "content": (
             f"原始任务：\n{task}\n\n"
-            f"是否包含直接图像输入：{'是' if image_paths else '否'}"
+            + (f"运行时日期约束：\n{runtime_hint}\n\n" if runtime_hint else "")
+            + f"是否包含直接图像输入：{'是' if image_paths else '否'}"
         )},
     ], tools=[])
     parsed = _json_object(str(response.get("content", "")))
@@ -173,12 +195,17 @@ def _orchestration_plan(backend: Any, task: str, image_paths: list[str]) -> dict
     if not isinstance(assignments, dict):
         assignments = {}
     normalized_assignments = {
-        "research": str(assignments.get("research", "") or "").strip(),
-        "engineering": str(assignments.get("engineering", "") or "").strip(),
-        "multimodal": str(assignments.get("multimodal", "") or "").strip(),
+        "research": _normalize_assignment(assignments.get("research", "")),
+        "engineering": _normalize_assignment(assignments.get("engineering", "")),
+        "multimodal": _normalize_assignment(assignments.get("multimodal", "")),
     }
+    if not image_paths:
+        normalized_assignments["multimodal"] = ""
+    use_subagents = bool(parsed.get("use_subagents", fallback["use_subagents"]))
+    if not any(normalized_assignments.values()):
+        use_subagents = False
     return {
-        "use_subagents": bool(parsed.get("use_subagents", fallback["use_subagents"])),
+        "use_subagents": use_subagents,
         "reason": str(parsed.get("reason", "") or fallback["reason"]).strip(),
         "main_task": str(parsed.get("main_task", "") or task).strip(),
         "assignments": normalized_assignments,
@@ -407,7 +434,7 @@ def run_multi_agent(
     workdir = Path(workdir).resolve()
     trace_path = Path(trace_path)
     image_paths = image_paths or []
-    orchestration = _orchestration_plan(backend, task, image_paths)
+    orchestration = _orchestration_plan(backend, task, image_paths, system_prompt)
     _append_trace_event(
         trace_path,
         parent_run_id,

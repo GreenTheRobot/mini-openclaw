@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 from agent.permissions import check
 from tools.fs import wrap_local_html
@@ -29,6 +30,22 @@ def test_dangerous_cross_platform_commands_are_blocked():
     ]
     for command in commands:
         assert "拒绝执行高危命令" in str(_bash(command))
+
+
+def test_bash_uses_utf8_replace_decoding(monkeypatch):
+    captured = {}
+
+    def fake_run(*args, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args[0], 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("tools.shell.subprocess.run", fake_run)
+
+    result = _bash("pwd")
+
+    assert result.success is True
+    assert captured["encoding"] == "utf-8"
+    assert captured["errors"] == "replace"
 
 
 def test_external_documents_are_marked_as_untrusted():

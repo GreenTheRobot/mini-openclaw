@@ -36,6 +36,14 @@ LITERATURE_TASK_HINTS = (
     "论文调研", "文献调研", "文献综述", "literature review", "papers",
 )
 LITERATURE_REPORT_TERMS = ("严格匹配", "提交日期", "摘要", "解决问题", "核心方法", "来源")
+LITERATURE_REPORT_FIELD_GROUPS = (
+    ("严格匹配", "匹配论文", "候选论文", "论文"),
+    ("提交日期", "发布日期", "更新日期", "日期", "published", "updated"),
+    ("摘要", "abstract", "概括"),
+    ("解决问题", "研究问题", "目标问题", "问题", "目标"),
+    ("核心方法", "方法思路", "方法", "思路", "approach", "method"),
+    ("来源", "链接", "source", "url", "arxiv.org", "doi.org"),
+)
 REUSABLE_OBSERVATION_TOOLS = {"arxiv_search", "web_fetch", "web_search", "read", "grep", "glob"}
 RESEARCH_DISCOVERY_TOOLS = {"arxiv_search", "web_fetch", "web_search"}
 URL_RE = re.compile(r"https?://[^\s<>'\"）)]+")
@@ -43,6 +51,7 @@ RECENT_LITERATURE_HINTS = (
     "最近", "近一周", "过去一周", "本周", "最新", "近期",
     "recent", "last week", "past week", "this week", "latest", "new papers",
 )
+RUNTIME_DATE_RE = re.compile(r"当前本地日期为\s*(\d{4}-\d{2}-\d{2})")
 NETWORK_PROBE_HINTS = ("curl", "wget", "requests", "httpx", "urllib", "http://", "https://")
 TODO_TOOL_NAMES = {"task_list", "todo_write", "update_todo"}
 FILE_MUTATION_TOOLS = {"write", "edit"}
@@ -80,6 +89,16 @@ def _is_recent_literature_task(user_task: str) -> bool:
     )
 
 
+def _runtime_today(system_prompt: str) -> date:
+    match = RUNTIME_DATE_RE.search(system_prompt)
+    if match:
+        try:
+            return date.fromisoformat(match.group(1))
+        except ValueError:
+            pass
+    return date.today()
+
+
 def _arxiv_query_from_search(query: str, user_task: str) -> str:
     text = query.strip() or user_task.strip()
     text = re.sub(r"https?://\S+", " ", text)
@@ -94,8 +113,22 @@ def _route_research_discovery_call(
     call_name: str,
     arguments: dict[str, Any],
     registry: ToolRegistry,
+    *,
+    today: date,
 ) -> tuple[str, dict[str, Any], str | None]:
     """Prefer deterministic research tools over fragile generic search when safe."""
+    if call_name == "arxiv_search" and _is_recent_literature_task(user_task):
+        routed_args = dict(arguments)
+        routed_args["start_date"] = (today - timedelta(days=7)).isoformat()
+        routed_args["end_date"] = today.isoformat()
+        if routed_args == arguments:
+            return call_name, arguments, None
+        return (
+            call_name,
+            routed_args,
+            "近期论文任务自动校正 arxiv_search 日期区间，避免沿用模型或调度器的旧日期。",
+        )
+
     if call_name != "web_search":
         return call_name, arguments, None
 
@@ -112,7 +145,6 @@ def _route_research_discovery_call(
             "query": _arxiv_query_from_search(str(arguments.get("query", "")), user_task),
         }
         if _is_recent_literature_task(user_task):
-            today = date.today()
             routed_args["start_date"] = (today - timedelta(days=7)).isoformat()
             routed_args["end_date"] = today.isoformat()
         if "max_results" in arguments:
@@ -148,7 +180,10 @@ def _is_insufficient_research_answer(user_task: str, answer: str) -> bool:
         return True
     has_source_link = "http://" in lowered or "https://" in lowered or "arxiv:" in lowered
     if _needs_literature_report(user_task):
-        covered = sum(1 for term in LITERATURE_REPORT_TERMS if term in answer)
+        covered = sum(
+            1 for group in LITERATURE_REPORT_FIELD_GROUPS
+            if any(term.lower() in lowered for term in group)
+        )
         return not has_source_link or covered < 5
     covered_terms = sum(1 for term in RESEARCH_REPORT_TERMS if term in lowered)
     return not has_source_link or covered_terms < 3
@@ -597,6 +632,7 @@ class AgentLoop:
                 if isinstance(arguments, dict):
                     call_name, arguments, route_note = _route_research_discovery_call(
                         user_task, call_name, arguments, self.registry,
+                        today=_runtime_today(self.system_prompt),
                     )
                 if call_name in RESEARCH_DISCOVERY_TOOLS:
                     research_tool_calls += 1
