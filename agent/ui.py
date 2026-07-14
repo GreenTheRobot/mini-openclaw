@@ -198,6 +198,7 @@ class EventRenderer:
                     {
                         "name": record.get("tool"),
                         "success": bool(record.get("success")),
+                        "category": record.get("category"),
                         "observation": record.get("observation", ""),
                     },
                 ))

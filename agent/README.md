@@ -36,7 +36,7 @@
 
 ### 子 Agent 上下文结构
 
-每个子 agent 都是一个新的 `AgentLoop` 实例，不直接继承父 agent 的完整 `messages` 历史。它拥有独立的消息列表、`Tracer`、`PermissionManager`、TODO 文件、工具子集和 `max_turns=30` 的执行预算。子 agent 的 system prompt 由主 CLI 的 `system_prompt` 加对应角色提示组成，例如 Research Agent 会收到通用系统约束、运行时日期、权限规则和 Skills catalog，再追加 `RESEARCH_PROMPT`。
+每个子 agent 都是一个新的 `AgentLoop` 实例，不直接继承父 agent 的完整 `messages` 历史。它拥有独立的消息列表、`Tracer`、`PermissionManager`、TODO 文件、工具子集和 `max_turns=20` 的执行预算。子 agent 的 system prompt 由主 CLI 的 `system_prompt` 加对应角色提示组成，例如 Research Agent 会收到通用系统约束、运行时日期、权限规则和 Skills catalog，再追加 `RESEARCH_PROMPT`。
 
 子 agent 的 user message 会包装原始任务和主 Agent 分配的具体工作，而不是复制父会话历史：
 
@@ -72,11 +72,21 @@ recent = 最近的完整消息与 assistant/tool 原子组
 
 成功的 `arxiv_search`、`web_fetch`、`web_search`、`read`、`grep`、`glob` observation 会在同一任务内按完整参数复用。`arxiv_search` 支持关键词、arXiv 分类和提交日期区间，直接返回标题、作者、日期、分类、摘要和来源链接。网页访问使用内置搜索工具，不通过 bash、curl、wget 或 requests 绕行。
 
-近期文献任务最多使用 12 次搜索/抓取调用，达到预算后停止扩展并整理结果。最终报告区分“严格匹配论文”和“扩展相关工作”，逐篇给出摘要、解决问题、核心方法、贡献和来源。如果第一版仍是搜索流水账，会在禁用工具的情况下自动重写一次。连续工具失败或达到最大轮数时也沿用同一交付要求。
+近期文献任务最多使用 30 次搜索/抓取调用，达到预算后停止扩展并整理结果。普通 Agent 主循环默认最多 40 轮，主 Agent 直接执行分支也是 40 轮，子 Agent 为 20 轮；这些预算用于防止无限循环，但已放宽以支持长任务。最终报告区分“严格匹配论文”和“扩展相关工作”，逐篇给出摘要、解决问题、核心方法、贡献和来源。如果第一版仍是搜索流水账，会在禁用工具的情况下自动重写一次。连续工具失败或达到最大轮数时也沿用同一交付要求。
 
 ## 科研回答与 Reviewer
 
-网页、项目、论文、GitHub 和方法调研任务会检查最终答复是否包含来源链接、方法说明和实际结论；状态汇报、空任务清单或过短回答会被要求重写。Reviewer 是独立模型审查阶段，不调用工具、不新增事实，并接收受限长度的工具证据；默认按需使用 `/audit`，单次命令可使用 `--audit`。
+网页、项目、论文、GitHub 和方法调研任务会在 `AgentLoop` 的最终出口检查答复质量，而不只依赖系统提示。`_is_insufficient_research_answer()` 会识别调研类任务，如果最终答复没有 `http(s)`/`arXiv` 来源链接、缺少方法/来源等关键结构、过短，或只是汇报 `task_list`/搜索过程，就会拦截本次最终回答，向模型追加 `_research_answer_repair_prompt()` 要求基于已有 observation 重写。文献检索任务还会要求严格匹配论文卡片包含提交日期、摘要、解决问题、核心方法、主要贡献/结论和来源链接；因此“文献调研不贴链接”会被视为不合格最终答复并触发修复。
+
+实验、训练和复现任务同样在 `AgentLoop` 最终出口做可复现性检查。`runs/` 只是实验元数据、日志和报告目录，默认不进入 Git，避免把日志和大文件污染仓库；真正的版本证据必须来自项目 Git。`_needs_experiment_tracking()` 命中后，最终答复前必须已有版本信息证据：优先来自 `experiment_prepare` 记录的 Git 状态，或通过 `bash` 成功执行 `git init`（如需要）、初始化 `.gitignore`、创建初始提交、`git status --short`、`git rev-parse HEAD`、`git branch --show-current` 等 Git 查询。`experiment_prepare` 如果检测到没有 Git 仓库或没有提交历史，会主动初始化 `.gitignore` 并创建 `chore: initialize experiment baseline` 基线提交。工作区 dirty 是允许的，但必须记录 `git_status`/`git_dirty` 并在最终答复中透明说明。若模型准备在没有任何 Git 状态证据的情况下结束，`AgentLoop` 会以 `missing_experiment_git_evidence` 拦截并要求先补 Git 记录。后续提交是可选动作，只有用户明确要求或确认时才执行。若冒烟测试、实验启动、状态检查或实验相关 bash 命令失败，而模型仍声称实验成功完成，最终答案会自动追加失败纠偏说明，明确失败工具、类别和原因。
+
+Reviewer 是独立模型审查阶段，不调用工具、不新增事实，并接收受限长度的工具证据；默认按需使用 `/audit`，单次命令可使用 `--audit`。
+
+## 实验 Git 基线
+
+实验任务应优先使用 `experiment_prepare` 记录可复现信息。该工具会在目标项目没有 Git 仓库时执行 `git init`，初始化 `.gitignore`，并创建一次 `chore: initialize experiment baseline` 初始提交，用来保存实验开始前的原始状态；如果目录已有 Git 但没有任何提交，也会补齐 `.gitignore` 并创建这次 baseline commit。
+
+后续实验修改不自动提交，是否提交由用户决定。最终实验回答需要透明说明基线提交、当前 Git 版本、工作区是否有未提交改动，以及实验产物路径；如果 Git 初始化或基线提交失败，必须明确告知失败原因，不能把无版本实验说成已可追踪。
 
 ## Unicode 与 Trace 鲁棒性
 

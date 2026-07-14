@@ -16,10 +16,130 @@ from .shell import is_dangerous_command
 
 _RUN_ROOT = Path("runs")
 
+_DEFAULT_GITIGNORE_LINES = [
+    "runs/",
+    "traces/",
+    ".mini-openclaw/",
+    "__pycache__/",
+    "*.pyc",
+    "*.pyo",
+    "*.log",
+    ".pytest_cache/",
+    ".venv/",
+    "venv/",
+    "out-*/",
+]
+
+
+def _git_result(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+
 
 def _git(*args: str) -> str:
-    result = subprocess.run(["git", *args], capture_output=True, text=True, timeout=10)
+    result = _git_result(*args)
     return result.stdout.strip() if result.returncode == 0 else "unknown"
+
+
+def _ensure_gitignore() -> bool:
+    path = Path(".gitignore")
+    existing = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+    existing_lines = {line.strip() for line in existing.splitlines()}
+    missing = [line for line in _DEFAULT_GITIGNORE_LINES if line not in existing_lines]
+    if not missing:
+        return False
+    prefix = existing.rstrip() + "\n" if existing.strip() else ""
+    path.write_text(prefix + "\n".join(missing) + "\n", encoding="utf-8")
+    return True
+
+
+def _ensure_git_identity() -> None:
+    email = _git_result("config", "user.email")
+    if email.returncode != 0 or not email.stdout.strip():
+        _git_result("config", "user.email", "mini-openclaw@example.invalid")
+    name = _git_result("config", "user.name")
+    if name.returncode != 0 or not name.stdout.strip():
+        _git_result("config", "user.name", "mini-openclaw")
+
+
+def _git_context() -> dict[str, Any]:
+    initialized = False
+    initial_commit_created = False
+    gitignore_initialized = False
+    git_error = ""
+
+    if not Path(".git").exists():
+        init = _git_result("init")
+        initialized = init.returncode == 0
+        if not initialized:
+            return {
+                "git_repository": False,
+                "git_initialized": False,
+                "gitignore_initialized": False,
+                "git_initial_commit_created": False,
+                "git_has_commit": False,
+                "git_commit": "unknown",
+                "git_branch": "unknown",
+                "git_status": "",
+                "git_dirty": False,
+                "git_error": (init.stderr or init.stdout or "git init failed").strip(),
+            }
+
+    inside = _git_result("rev-parse", "--is-inside-work-tree")
+    if inside.returncode != 0:
+        return {
+            "git_repository": False,
+            "git_initialized": initialized,
+            "gitignore_initialized": False,
+            "git_initial_commit_created": False,
+            "git_has_commit": False,
+            "git_commit": "unknown",
+            "git_branch": "unknown",
+            "git_status": "",
+            "git_dirty": False,
+            "git_error": (inside.stderr or inside.stdout or "not a git repository").strip(),
+        }
+
+    commit = _git_result("rev-parse", "HEAD")
+    has_commit = commit.returncode == 0
+    if not has_commit:
+        gitignore_initialized = _ensure_gitignore()
+        _ensure_git_identity()
+        add = _git_result("add", ".")
+        if add.returncode != 0:
+            git_error = (add.stderr or add.stdout or "git add failed").strip()
+        else:
+            baseline = _git_result("commit", "-m", "chore: initialize experiment baseline")
+            if baseline.returncode == 0:
+                initial_commit_created = True
+                commit = _git_result("rev-parse", "HEAD")
+                has_commit = commit.returncode == 0
+            else:
+                git_error = (baseline.stderr or baseline.stdout or "git commit failed").strip()
+
+    branch = _git_result("branch", "--show-current")
+    status = _git_result("status", "--short")
+    if not has_commit and not git_error:
+        git_error = (commit.stderr or commit.stdout or "git has no commits").strip()
+
+    return {
+        "git_repository": True,
+        "git_initialized": initialized,
+        "gitignore_initialized": gitignore_initialized,
+        "git_initial_commit_created": initial_commit_created,
+        "git_has_commit": has_commit,
+        "git_commit": commit.stdout.strip() if has_commit else "unknown",
+        "git_branch": branch.stdout.strip() if branch.returncode == 0 else "unknown",
+        "git_status": status.stdout.strip() if status.returncode == 0 else "",
+        "git_dirty": bool(status.stdout.strip()) if status.returncode == 0 else False,
+        "git_error": git_error,
+    }
 
 
 def _load(run_id: str) -> tuple[Path, dict[str, Any]]:
@@ -38,6 +158,17 @@ def _save(directory: Path, metadata: dict[str, Any]) -> None:
 
 
 def _experiment_prepare(command: str, name: str = "experiment", config: str = "", seed: int = 42) -> str:
+    git = _git_context()
+    if not git["git_repository"]:
+        return ToolResult(
+            json.dumps({
+                "error": "实验准备需要 Git 仓库，但 git init 失败",
+                **git,
+                "suggestion": "请检查 git 是否安装、当前目录是否可写，然后重新准备实验。",
+            }, ensure_ascii=False, indent=2),
+            False,
+            "git_unavailable",
+        )
     safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "-", name).strip("-")[:30] or "experiment"
     run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + safe_name
     directory = _RUN_ROOT / run_id
@@ -49,14 +180,13 @@ def _experiment_prepare(command: str, name: str = "experiment", config: str = ""
         "command": command,
         "config": config,
         "seed": seed,
-        "git_commit": _git("rev-parse", "HEAD"),
-        "git_branch": _git("branch", "--show-current"),
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "log_path": str(directory / "train.log"),
         "error_path": str(directory / "error.log"),
         "output_path": str(directory),
+        **git,
     }
     _save(directory, metadata)
     return json.dumps(metadata, ensure_ascii=False, indent=2)
@@ -146,6 +276,11 @@ def _experiment_report(run_id: str) -> str:
         f"# 实验报告：{metadata['name']}", "", f"- Run ID：`{run_id}`",
         f"- 状态：{metadata['status']}",
         f"- Git：`{metadata['git_commit']}`（{metadata['git_branch']}）",
+        f"- Git 仓库：{'yes' if metadata.get('git_repository') else 'no'}；"
+        f"基线提交：{'yes' if metadata.get('git_has_commit') else 'no'}；"
+        f"本次是否初始化：{'yes' if metadata.get('git_initialized') else 'no'}；"
+        f"是否创建初始提交：{'yes' if metadata.get('git_initial_commit_created') else 'no'}",
+        f"- Git 工作区：{'dirty' if metadata.get('git_dirty') else 'clean'}",
         f"- 命令：`{metadata['command']}`",
         f"- 配置：`{metadata['config'] or '未指定'}`",
         f"- 随机种子：{metadata['seed']}", f"- Python：{metadata['python']}",

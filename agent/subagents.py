@@ -73,6 +73,9 @@ RESEARCH_TOOLS = {
     "pdf_extract_text", "pdf_metadata", "paper_figure_analyze",
     "remember",
 }
+
+ROLE_MAX_TURNS = 20
+MAIN_AGENT_MAX_TURNS = 40
 MULTIMODAL_TOOLS = {
     "task_list", "todo_write", "update_todo",
     "read", "glob", "pdf_extract_text", "pdf_metadata", "paper_figure_analyze",
@@ -94,6 +97,19 @@ def _temporary_env(name: str, value: str):
 
 def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-") or "agent"
+
+
+def _active_assignment(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+    noop_markers = (
+        "不需要", "无需", "不用", "没有", "无", "none", "n/a", "na",
+        "not needed", "no need", "skip", "omit",
+        "涓嶉渶瑕", "鏃犻渶", "涓嶇敤",
+    )
+    return "" if any(marker in lowered for marker in noop_markers) else text
 
 
 def _registry_subset(registry: ToolRegistry, names: set[str]) -> ToolRegistry:
@@ -157,12 +173,13 @@ def _fallback_orchestration(task: str, image_paths: list[str]) -> dict[str, Any]
     }
 
 
-def _orchestration_plan(backend: Any, task: str, image_paths: list[str]) -> dict[str, Any]:
+def _orchestration_plan(backend: Any, task: str, image_paths: list[str], system_context: str = "") -> dict[str, Any]:
     response = backend.chat([
         {"role": "system", "content": ORCHESTRATION_PROMPT},
         {"role": "user", "content": (
             f"原始任务：\n{task}\n\n"
-            f"是否包含直接图像输入：{'是' if image_paths else '否'}"
+            f"是否包含直接图像输入：{'是' if image_paths else '否'}\n\n"
+            f"当前系统上下文：\n{system_context[-2000:]}"
         )},
     ], tools=[])
     parsed = _json_object(str(response.get("content", "")))
@@ -173,9 +190,9 @@ def _orchestration_plan(backend: Any, task: str, image_paths: list[str]) -> dict
     if not isinstance(assignments, dict):
         assignments = {}
     normalized_assignments = {
-        "research": str(assignments.get("research", "") or "").strip(),
-        "engineering": str(assignments.get("engineering", "") or "").strip(),
-        "multimodal": str(assignments.get("multimodal", "") or "").strip(),
+        "research": _active_assignment(assignments.get("research", "")),
+        "engineering": _active_assignment(assignments.get("engineering", "")),
+        "multimodal": _active_assignment(assignments.get("multimodal", "")),
     }
     return {
         "use_subagents": bool(parsed.get("use_subagents", fallback["use_subagents"])),
@@ -271,7 +288,7 @@ def _run_role(
         backend,
         registry,
         role_prompt,
-        max_turns=30,
+        max_turns=ROLE_MAX_TURNS,
         workdir=workdir,
         auto_approve=auto_approve,
         confirm_callback=confirm_callback,
@@ -312,7 +329,7 @@ def _run_main_agent(
         backend,
         registry,
         system_prompt + "\n\n你是主 Agent。请直接完成当前任务；只有用户可见答案应聚焦任务本身。",
-        max_turns=30,
+        max_turns=MAIN_AGENT_MAX_TURNS,
         workdir=workdir,
         auto_approve=auto_approve,
         confirm_callback=confirm_callback,
@@ -407,7 +424,7 @@ def run_multi_agent(
     workdir = Path(workdir).resolve()
     trace_path = Path(trace_path)
     image_paths = image_paths or []
-    orchestration = _orchestration_plan(backend, task, image_paths)
+    orchestration = _orchestration_plan(backend, task, image_paths, system_prompt)
     _append_trace_event(
         trace_path,
         parent_run_id,
@@ -453,7 +470,7 @@ def run_multi_agent(
     )]
     tool_evidence: list[str] = []
 
-    multimodal_task = str(assignments.get("multimodal", "") or "").strip()
+    multimodal_task = _active_assignment(assignments.get("multimodal", ""))
     if multimodal_task and image_paths and vision_backend is not None:
         if event_callback is not None:
             event_callback("subagent_start", {"role": "Multimodal Agent", "assignment": multimodal_task})
@@ -520,7 +537,7 @@ def run_multi_agent(
         if evidence_part:
             tool_evidence.append(evidence_part)
 
-    research_task = str(assignments.get("research", "") or "").strip()
+    research_task = _active_assignment(assignments.get("research", ""))
     if research_task:
         if event_callback is not None:
             event_callback("subagent_start", {"role": "Research Agent", "assignment": research_task})
@@ -549,7 +566,7 @@ def run_multi_agent(
         if evidence_part:
             tool_evidence.append(evidence_part)
 
-    engineering_task = str(assignments.get("engineering", "") or "").strip()
+    engineering_task = _active_assignment(assignments.get("engineering", ""))
     if engineering_task:
         if event_callback is not None:
             event_callback("subagent_start", {"role": "Engineering Agent", "assignment": engineering_task})

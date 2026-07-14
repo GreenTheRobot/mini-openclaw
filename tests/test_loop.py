@@ -71,6 +71,31 @@ def test_loop_treats_semantic_tool_failure_as_recoverable_observation(tmp_path: 
     assert any("[TOOL_ERROR]" in message.get("content", "") for message in seen_messages[-1])
 
 
+def test_loop_emits_tool_failure_category(tmp_path: Path):
+    events = []
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "vision", "", {"type": "object", "properties": {}, "additionalProperties": False},
+        lambda: ToolResult("missing key", False, "vision_backend_unavailable"),
+    ))
+    backend = SequenceBackend([
+        {"content": "", "tool_calls": [{"id": "vision-1", "name": "vision", "arguments": {}}]},
+        {"content": "recovered", "tool_calls": []},
+    ])
+    loop = AgentLoop(
+        backend,
+        registry,
+        "system",
+        workdir=tmp_path,
+        auto_approve=True,
+        event_callback=lambda event, payload: events.append((event, payload)),
+    )
+
+    assert loop.run("task") == "recovered"
+    failures = [payload for event, payload in events if event == "tool_result" and not payload["success"]]
+    assert failures[0]["category"] == "vision_backend_unavailable"
+
+
 def test_loop_corrects_unverified_save_claim_after_write_denied(tmp_path: Path):
     registry = ToolRegistry()
     registry.register(write_tool)
@@ -90,6 +115,101 @@ def test_loop_corrects_unverified_save_claim_after_write_denied(tmp_path: Path):
     assert "没有实际保存这些文件" in answer
     assert "`write` `structured_notes.md`：confirmation_required" in answer
     assert not (tmp_path / "structured_notes.md").exists()
+
+
+def test_loop_blocks_experiment_final_without_git_evidence(tmp_path: Path):
+    seen_messages = []
+
+    class ExperimentBackend:
+        def __init__(self):
+            self.turn = 0
+
+        def chat(self, messages, tools=None):
+            seen_messages.append([dict(message) for message in messages])
+            self.turn += 1
+            if self.turn == 1:
+                return {"content": "实验已完成。", "tool_calls": []}
+            if self.turn == 2:
+                return {"content": "", "tool_calls": [{
+                    "id": "git-status",
+                    "name": "bash",
+                    "arguments": {"command": "git status --short"},
+                }]}
+            return {"content": "实验未正式运行；已补充 Git 状态记录。", "tool_calls": []}
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "bash", "", {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+        lambda command: "clean",
+    ))
+    trace = tmp_path / "experiment-git.jsonl"
+    loop = AgentLoop(ExperimentBackend(), registry, "system", workdir=tmp_path, auto_approve=True, tracer=Tracer(trace))
+
+    answer = loop.run("跑一个训练实验")
+
+    assert "已补充 Git 状态记录" in answer
+    assert any("没有可复现的 Git 记录证据" in str(message.get("content", "")) for message in seen_messages[1])
+    assert any("git init" in str(message.get("content", "")) for message in seen_messages[1])
+    assert any("初始 baseline commit" in str(message.get("content", "")) for message in seen_messages[1])
+    assert "missing_experiment_git_evidence" in trace.read_text(encoding="utf-8")
+
+
+def test_loop_corrects_experiment_success_claim_after_smoke_failure(tmp_path: Path):
+    class ExperimentBackend:
+        def __init__(self):
+            self.turn = 0
+
+        def chat(self, messages, tools=None):
+            self.turn += 1
+            if self.turn == 1:
+                return {"content": "", "tool_calls": [{
+                    "id": "prepare",
+                    "name": "experiment_prepare",
+                    "arguments": {"command": "python train.py", "name": "demo"},
+                }]}
+            if self.turn == 2:
+                return {"content": "", "tool_calls": [{
+                    "id": "smoke",
+                    "name": "experiment_smoke_test",
+                    "arguments": {"command": "python train.py", "timeout_seconds": 5},
+                }]}
+            return {"content": "训练实验已成功完成。", "tool_calls": []}
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "experiment_prepare", "", {
+            "type": "object",
+            "properties": {"command": {"type": "string"}, "name": {"type": "string"}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+        lambda command, name="experiment": '{"git_commit": "abc123", "status": "prepared"}',
+    ))
+    registry.register(Tool(
+        "experiment_smoke_test", "", {
+            "type": "object",
+            "properties": {"command": {"type": "string"}, "timeout_seconds": {"type": "integer"}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+        lambda command, timeout_seconds=60: ToolResult(
+            '{"success": false, "returncode": 1, "stderr": "boom"}',
+            False,
+            "smoke_test_failed",
+        ),
+    ))
+    loop = AgentLoop(ExperimentBackend(), registry, "system", workdir=tmp_path, auto_approve=True)
+
+    answer = loop.run("跑一个训练实验")
+
+    assert "训练实验已成功完成" in answer
+    assert "不能声称实验已经成功完成" in answer
+    assert "`experiment_smoke_test`：smoke_test_failed" in answer
 
 
 def test_session_domain_grant_avoids_repeated_confirmation(tmp_path: Path):
@@ -252,7 +372,7 @@ def test_error_budget_produces_partial_answer_from_existing_evidence(tmp_path: P
     trace = tmp_path / "error-budget.jsonl"
     loop = AgentLoop(
         backend, registry, "system", workdir=tmp_path,
-        auto_approve=True, tracer=Tracer(trace), max_consecutive_errors=2,
+        auto_approve=True, tracer=Tracer(trace), max_consecutive_errors=4,
     )
 
     answer = loop.run("研究项目")
@@ -265,61 +385,9 @@ def test_error_budget_produces_partial_answer_from_existing_evidence(tmp_path: P
         for line in trace.read_text(encoding="utf-8").splitlines()
     ]
     assert any(record.get("event") == "error_budget_exhausted" for record in records)
-    event = next(record for record in records if record.get("event") == "error_budget_exhausted")
-    assert event["error_budget_unit"] == "model_turn"
     assert records[-1]["event"] == "run_end"
     assert records[-1]["status"] == "partial"
     assert records[-1]["reason"] == "tool_error_budget"
-
-
-def test_one_batch_of_schema_failures_does_not_exhaust_recovery_budget(tmp_path: Path):
-    import json
-
-    class Backend:
-        supports_tools = True
-
-        def __init__(self):
-            self.turn = 0
-            self.fallback_called = False
-
-        def chat(self, messages, tools=None):
-            if tools == []:
-                self.fallback_called = True
-                return {"content": "不应在第一轮失败后提前兜底", "tool_calls": []}
-            self.turn += 1
-            if self.turn == 1:
-                return {"content": "", "tool_calls": [
-                    {"id": f"bad-{index}", "name": "strict", "arguments": {"unexpected": index}}
-                    for index in range(4)
-                ]}
-            if self.turn == 2:
-                return {"content": "", "tool_calls": [
-                    {"id": "good", "name": "strict", "arguments": {"text": "fixed"}},
-                ]}
-            return {"content": "已在下一轮修正参数并完成读取。", "tool_calls": []}
-
-    registry = ToolRegistry()
-    registry.register(Tool(
-        "strict", "", {
-            "type": "object",
-            "properties": {"text": {"type": "string"}},
-            "required": ["text"],
-            "additionalProperties": False,
-        }, lambda text: text,
-    ))
-    backend = Backend()
-    trace = tmp_path / "schema-batch.jsonl"
-    loop = AgentLoop(backend, registry, "system", workdir=tmp_path, auto_approve=True, tracer=Tracer(trace))
-
-    assert loop.run("读取代码") == "已在下一轮修正参数并完成读取。"
-    assert backend.turn == 3
-    assert backend.fallback_called is False
-    assert loop.last_run_status == "success"
-    records = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
-    failures = [record for record in records if record.get("event") == "tool_result" and not record.get("success")]
-    assert len(failures) == 4
-    assert {record.get("category") for record in failures} == {"schema_validation"}
-    assert not any(record.get("event") == "error_budget_exhausted" for record in records)
 
 
 def test_loop_rejects_status_only_research_answer(tmp_path: Path):

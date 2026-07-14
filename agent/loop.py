@@ -39,6 +39,26 @@ RESEARCH_DISCOVERY_TOOLS = {"arxiv_search", "web_fetch", "web_search"}
 NETWORK_PROBE_HINTS = ("curl", "wget", "requests", "httpx", "urllib", "http://", "https://")
 TODO_TOOL_NAMES = {"task_list", "todo_write", "update_todo"}
 FILE_MUTATION_TOOLS = {"write", "edit"}
+EXPERIMENT_TOOLS = {
+    "experiment_prepare", "experiment_smoke_test", "experiment_start",
+    "experiment_status", "experiment_report",
+}
+EXPERIMENT_TASK_HINTS = (
+    "实验", "训练", "复现", "跑一下", "跑实验", "运行实验", "benchmark",
+    "评估", "测试模型", "train", "finetune", "fine-tune", "evaluate",
+)
+EXPERIMENT_SUCCESS_HINTS = (
+    "实验完成", "实验已完成", "已完成实验", "训练完成", "复现完成",
+    "测试通过", "冒烟测试通过", "成功完成", "已成功", "successfully",
+    "completed", "passed",
+)
+EXPERIMENT_FAILURE_HINTS = (
+    "失败", "未完成", "没有完成", "报错", "错误", "未通过", "failed",
+    "error", "timeout", "nonzero", "returncode",
+)
+GIT_TRACKING_COMMANDS = (
+    "git init", "git status", "git rev-parse", "git log", "git diff", "git show",
+)
 FILE_MUTATION_SUCCESS_HINTS = (
     "已保存", "已写入", "已修改", "已更新", "已生成", "已创建",
     "保存到", "写入到", "内容保存在", "saved", "written", "modified",
@@ -147,6 +167,54 @@ def _correct_unverified_file_mutation_claims(answer: str, failures: list[dict[st
     )
     return answer.rstrip() + correction
 
+
+def _needs_experiment_tracking(user_task: str) -> bool:
+    lowered = user_task.lower()
+    return any(hint.lower() in lowered for hint in EXPERIMENT_TASK_HINTS)
+
+
+def _is_git_tracking_command(command: str) -> bool:
+    lowered = " ".join(str(command).lower().split())
+    return any(lowered.startswith(prefix) or f" {prefix}" in lowered for prefix in GIT_TRACKING_COMMANDS)
+
+
+def _mentions_successful_experiment(answer: str) -> bool:
+    lowered = answer.lower()
+    return (
+        any(hint.lower() in lowered for hint in EXPERIMENT_SUCCESS_HINTS)
+        and not any(hint.lower() in lowered for hint in EXPERIMENT_FAILURE_HINTS)
+    )
+
+
+def _format_failed_experiment_action(failure: dict[str, Any]) -> str:
+    tool = failure.get("tool") or "experiment"
+    category = failure.get("category") or "unknown"
+    message = failure.get("message") or "未执行"
+    return f"- `{tool}`：{category}，{message}"
+
+
+def _correct_unverified_experiment_claims(answer: str, failures: list[dict[str, Any]]) -> str:
+    """Append a deterministic correction when failed experiments are overstated."""
+    if not answer.strip() or not failures or not _mentions_successful_experiment(answer):
+        return answer
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for failure in failures:
+        key = (str(failure.get("tool", "")), str(failure.get("message", ""))[:120])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(failure)
+    details = "\n".join(_format_failed_experiment_action(item) for item in unique[:5])
+    more = "" if len(unique) <= 5 else f"\n- 另有 {len(unique) - 5} 个实验相关步骤失败。"
+    correction = (
+        "\n\n> 注意：本次运行中存在实验、冒烟测试、启动或状态检查失败，"
+        "因此不能声称实验已经成功完成；上文若有成功表述，以本说明为准。\n"
+        f"{details}{more}"
+    )
+    return answer.rstrip() + correction
+
+
 class AgentLoop:
     _FAILURE_SUGGESTIONS = {
         "http_not_found": "该地址不存在；回到真实目录列表或父级 API，不要继续猜测相邻路径",
@@ -159,14 +227,14 @@ class AgentLoop:
     }
 
     def __init__(self, backend: Any, registry: ToolRegistry, system_prompt: str,
-                 max_turns: int = 30, workdir: str | Path | None = None,
+                 max_turns: int = 40, workdir: str | Path | None = None,
                  auto_approve: bool = False,
                  confirm_callback: Callable[[str, dict[str, Any], permissions.PermissionDecision], bool] | None = None,
                  tracer: Any | None = None, max_consecutive_errors: int = 4,
                  max_repeated_call: int = 3,
                  event_callback: Callable[[str, dict[str, Any]], None] | None = None,
                  context_budget: int = 20000,
-                 max_research_calls: int = 12,
+                 max_research_calls: int = 30,
                  permission_manager: permissions.PermissionManager | None = None):
         self.backend = backend
         self.registry = registry
@@ -370,7 +438,6 @@ class AgentLoop:
         self._emit(
             "error_budget_exhausted",
             consecutive_errors=consecutive_errors,
-            error_budget_unit="model_turn",
             successful_tools=successful_tools,
             categories=error_categories,
         )
@@ -378,7 +445,6 @@ class AgentLoop:
             self.tracer.log_event(
                 "error_budget_exhausted",
                 consecutive_errors=consecutive_errors,
-                error_budget_unit="model_turn",
                 successful_tools=successful_tools,
                 categories=error_categories,
             )
@@ -388,7 +454,7 @@ class AgentLoop:
             successful_tools=successful_tools,
             fallback_turn=turn + 2,
             reason="tool_error_budget",
-            heading=f"连续 {consecutive_errors} 轮工具调用均失败，停止探索并交付结果",
+            heading=f"连续 {consecutive_errors} 次工具失败，停止探索并交付结果",
         )
     def run(self, user_task: str, image_paths: list[str] | None = None) -> str:
         user_task = clean_text(user_task)
@@ -408,6 +474,9 @@ class AgentLoop:
         successful_tools = 0
         error_categories: list[str] = []
         failed_file_mutations: list[dict[str, Any]] = []
+        failed_experiment_actions: list[dict[str, Any]] = []
+        experiment_git_repairs = 0
+        has_experiment_git_evidence = False
         research_answer_repairs = 0
         research_tool_calls = 0
         last_compaction_turn = -3
@@ -511,15 +580,40 @@ class AgentLoop:
                             "final_blocked", reason="insufficient_research_answer", turn=turn + 1,
                         )
                     continue
+                if (
+                    _needs_experiment_tracking(user_task)
+                    and not has_experiment_git_evidence
+                    and experiment_git_repairs < 1
+                ):
+                    experiment_git_repairs += 1
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "你刚才准备给最终答复，但这是实验/训练/复现任务，当前对话还没有可复现的 Git 记录证据。\n"
+                            "请先补充 Git 管理信息：优先调用 `experiment_prepare`；它会在缺少 Git 仓库或提交历史时"
+                            "初始化 `.gitignore` 并创建一次初始 baseline commit。也可以用 `bash` 在实际实验项目目录执行 "
+                            "`git init`、初始化 `.gitignore`、创建初始提交、`git status --short`、"
+                            "`git rev-parse HEAD` / `git branch --show-current`。"
+                            "后续提交是可选动作，只有用户明确同意时才执行。最终答复必须透明说明：是否有 Git 仓库、"
+                            "是否有基线 commit、工作区是否 dirty，以及实验是否包含未提交改动。"
+                        ),
+                    })
+                    self._emit("final_blocked", reason="missing_experiment_git_evidence", turn=turn + 1)
+                    if self.tracer:
+                        self.tracer.log_event(
+                            "final_blocked", reason="missing_experiment_git_evidence", turn=turn + 1,
+                        )
+                    continue
                 answer = _correct_unverified_file_mutation_claims(answer, failed_file_mutations)
+                answer = _correct_unverified_experiment_claims(answer, failed_experiment_actions)
                 self._emit("answer", content=answer, turn=turn + 1)
                 self.last_run_status = "success" if answer else "failed"
                 if self.tracer:
                     self.tracer.finish_run(status=self.last_run_status, turns=turn + 1)
                 return answer or "[模型未返回内容，任务失败]"
 
-            # 同一条模型回复可能声明多个工具调用。恢复预算按“整轮是否完全
-            # 失败”计数，避免同一个 schema 问题在一轮内耗尽所有恢复机会。
+            # A single assistant message may request multiple tools. Count recovery
+            # budget by whole turn so one bad schema batch does not exhaust it.
             turn_had_success = False
             turn_error_categories: list[str] = []
             for call in tool_calls:
@@ -555,7 +649,6 @@ class AgentLoop:
                         obs = self._error(call_name, "schema_validation", "; ".join(validation_errors))
                     elif call_name in REUSABLE_OBSERVATION_TOOLS and signature in reusable_observations:
                         success = True
-                        error_category = "ok"
                         obs = (
                             "[已复用此前相同调用的成功 observation；请基于该结果继续，"
                             "不要再次使用完全相同的参数。]\n"
@@ -603,6 +696,15 @@ class AgentLoop:
                             obs = self._error(call_name, "execution_error", str(exc))
                 if success and call_name in REUSABLE_OBSERVATION_TOOLS and isinstance(arguments, dict):
                     reusable_observations.setdefault(signature, str(obs))
+                if success and (
+                    call_name == "experiment_prepare"
+                    or (
+                        call_name == "bash"
+                        and isinstance(arguments, dict)
+                        and _is_git_tracking_command(str(arguments.get("command", "")))
+                    )
+                ):
+                    has_experiment_git_evidence = True
                 if success:
                     successful_tools += 1
                     turn_had_success = True
@@ -616,6 +718,16 @@ class AgentLoop:
                             "category": parsed_error.get("category", error_category),
                             "message": parsed_error.get("message", str(obs)),
                         })
+                    if (
+                        call_name in EXPERIMENT_TOOLS
+                        or (_needs_experiment_tracking(user_task) and call_name == "bash")
+                    ):
+                        parsed_error = _parse_tool_error_fields(str(obs))
+                        failed_experiment_actions.append({
+                            "tool": call_name,
+                            "category": parsed_error.get("category", error_category),
+                            "message": parsed_error.get("message", str(obs))[:1000],
+                        })
                 messages.append({
                     "role": "tool",
                     "name": call_name,
@@ -623,8 +735,11 @@ class AgentLoop:
                     "content": self._observation_content(turn + 1, call_name, str(obs)),
                 })
                 self._emit(
-                    "tool_result", name=call_name, success=success,
-                    category=error_category, observation=str(obs),
+                    "tool_result",
+                    name=call_name,
+                    success=success,
+                    category=error_category,
+                    observation=str(obs),
                 )
                 if self.tracer:
                     self.tracer.log_event(
@@ -641,6 +756,8 @@ class AgentLoop:
                             output=obs,
                             attributes={"category": error_category},
                         )
+            # 等本批 assistant 声明的全部 tool_calls 都回填结果后再停止探索，
+            # 避免把不完整的 assistant/tool 协议保留到跨轮会话历史中。
             if turn_had_success:
                 consecutive_errors = 0
                 error_categories.clear()
@@ -649,8 +766,6 @@ class AgentLoop:
                 for category in dict.fromkeys(turn_error_categories):
                     if category not in error_categories:
                         error_categories.append(category)
-            # 等本批 assistant 声明的全部 tool_calls 都回填结果后再停止探索，
-            # 避免把不完整的 assistant/tool 协议保留到跨轮会话历史中。
             if consecutive_errors >= self.max_consecutive_errors:
                 return self._finalize_after_tool_errors(
                     messages,
