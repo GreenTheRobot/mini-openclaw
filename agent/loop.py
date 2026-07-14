@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 from collections import Counter
-from datetime import date, timedelta
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable
@@ -38,11 +36,6 @@ LITERATURE_TASK_HINTS = (
 LITERATURE_REPORT_TERMS = ("严格匹配", "提交日期", "摘要", "解决问题", "核心方法", "来源")
 REUSABLE_OBSERVATION_TOOLS = {"arxiv_search", "web_fetch", "web_search", "read", "grep", "glob"}
 RESEARCH_DISCOVERY_TOOLS = {"arxiv_search", "web_fetch", "web_search"}
-URL_RE = re.compile(r"https?://[^\s<>'\"）)]+")
-RECENT_LITERATURE_HINTS = (
-    "最近", "近一周", "过去一周", "本周", "最新", "近期",
-    "recent", "last week", "past week", "this week", "latest", "new papers",
-)
 NETWORK_PROBE_HINTS = ("curl", "wget", "requests", "httpx", "urllib", "http://", "https://")
 TODO_TOOL_NAMES = {"task_list", "todo_write", "update_todo"}
 FILE_MUTATION_TOOLS = {"write", "edit"}
@@ -64,66 +57,6 @@ def _needs_research_report(user_task: str) -> bool:
 def _needs_literature_report(user_task: str) -> bool:
     lowered = user_task.lower()
     return any(hint.lower() in lowered for hint in LITERATURE_TASK_HINTS)
-
-
-def _first_url(text: str) -> str | None:
-    match = URL_RE.search(text)
-    if not match:
-        return None
-    return match.group(0).rstrip(".,;:，。；：")
-
-
-def _is_recent_literature_task(user_task: str) -> bool:
-    lowered = user_task.lower()
-    return _needs_literature_report(user_task) and any(
-        hint.lower() in lowered for hint in RECENT_LITERATURE_HINTS
-    )
-
-
-def _arxiv_query_from_search(query: str, user_task: str) -> str:
-    text = query.strip() or user_task.strip()
-    text = re.sub(r"https?://\S+", " ", text)
-    text = re.sub(r"\b(arxiv|paper|papers|search|find|recent|latest)\b", " ", text, flags=re.I)
-    text = re.sub(r"[最近近一周过去本周最新近期论文文献检索查找寻找帮我调用告诉关于的]+", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text or query.strip() or user_task.strip()
-
-
-def _route_research_discovery_call(
-    user_task: str,
-    call_name: str,
-    arguments: dict[str, Any],
-    registry: ToolRegistry,
-) -> tuple[str, dict[str, Any], str | None]:
-    """Prefer deterministic research tools over fragile generic search when safe."""
-    if call_name != "web_search":
-        return call_name, arguments, None
-
-    direct_url = _first_url(user_task)
-    if direct_url and registry.get("web_fetch") is not None:
-        return (
-            "web_fetch",
-            {"url": direct_url},
-            "明确 URL 任务自动从 web_search 路由到 web_fetch，避免先搜索再猜页面。",
-        )
-
-    if _needs_literature_report(user_task) and registry.get("arxiv_search") is not None:
-        routed_args: dict[str, Any] = {
-            "query": _arxiv_query_from_search(str(arguments.get("query", "")), user_task),
-        }
-        if _is_recent_literature_task(user_task):
-            today = date.today()
-            routed_args["start_date"] = (today - timedelta(days=7)).isoformat()
-            routed_args["end_date"] = today.isoformat()
-        if "max_results" in arguments:
-            routed_args["max_results"] = arguments["max_results"]
-        return (
-            "arxiv_search",
-            routed_args,
-            "文献/近期论文任务自动从 web_search 路由到 arxiv_search，减少通用网页搜索失败。",
-        )
-
-    return call_name, arguments, None
 
 
 def _literature_delivery_requirements(user_task: str) -> str:
@@ -590,18 +523,12 @@ class AgentLoop:
             turn_had_success = False
             turn_error_categories: list[str] = []
             for call in tool_calls:
-                arguments = call.get("arguments")
-                original_call_name = str(call.get("name", ""))
-                call_name = original_call_name
-                route_note: str | None = None
-                if isinstance(arguments, dict):
-                    call_name, arguments, route_note = _route_research_discovery_call(
-                        user_task, call_name, arguments, self.registry,
-                    )
+                call_name = str(call.get("name", ""))
                 if call_name in RESEARCH_DISCOVERY_TOOLS:
                     research_tool_calls += 1
                 if call_name in TODO_TOOL_NAMES:
                     used_todo = True
+                arguments = call.get("arguments")
                 tool = self.registry.get(call_name)
                 success = False
                 error_category = "unknown_error"
@@ -674,13 +601,6 @@ class AgentLoop:
                         except Exception as exc:  # 工具错误必须回填给模型自修复
                             error_category = "execution_error"
                             obs = self._error(call_name, "execution_error", str(exc))
-                if route_note:
-                    obs = (
-                        f"[工具路由] {route_note}\n"
-                        f"原始调用：{original_call_name} {json.dumps(call.get('arguments'), ensure_ascii=False)}\n"
-                        f"实际调用：{call_name} {json.dumps(arguments, ensure_ascii=False)}\n\n"
-                        f"{obs}"
-                    )
                 if success and call_name in REUSABLE_OBSERVATION_TOOLS and isinstance(arguments, dict):
                     reusable_observations.setdefault(signature, str(obs))
                 if success:
