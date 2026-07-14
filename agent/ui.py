@@ -14,10 +14,12 @@ class EventRenderer:
         self.verbose = verbose
         self.last_events: list[tuple[str, dict[str, Any]]] = []
         self._working_shown = False
+        self._reported_failures: set[tuple[str, str, str]] = set()
 
     def begin_turn(self) -> None:
         self.last_events = []
         self._working_shown = False
+        self._reported_failures = set()
 
     def set_verbose(self, enabled: bool) -> None:
         self.verbose = enabled
@@ -27,9 +29,11 @@ class EventRenderer:
         if self.verbose:
             self._render_verbose(event, payload)
             return
-        if event == "model_start" and not self._working_shown:
-            self.print_fn("\n● 正在处理，请稍候...")
-            self._working_shown = True
+        if event == "model_start":
+            self._reported_failures = set()
+            if not self._working_shown:
+                self.print_fn("\n● 正在处理，请稍候...")
+                self._working_shown = True
         elif event == "orchestration":
             if payload.get("use_subagents"):
                 self.print_fn(f"  ● 主 Agent 调度：启用子 Agent。{self._preview(payload.get('reason'))}")
@@ -60,7 +64,11 @@ class EventRenderer:
             self.print_fn("  ● 调研答案缺少必要来源或结构，正在重写最终报告。")
         elif event == "tool_result" and not payload.get("success"):
             role = f"{payload.get('role')} 的 " if payload.get("role") else ""
-            self.print_fn(f"  ⚠ {role}{payload.get('name')} 失败，智能体正在尝试恢复。")
+            category = str(payload.get("category") or "unknown_error")
+            key = (str(payload.get("role") or ""), str(payload.get("name") or "tool"), category)
+            if key not in self._reported_failures:
+                self._reported_failures.add(key)
+                self.print_fn(f"  ⚠ {role}{payload.get('name')} 失败（{category}），智能体正在尝试恢复。")
         elif event == "compaction":
             self.print_fn("  ● 已压缩较早的对话历史并保留关键约束。")
         elif event == "protocol_repaired":

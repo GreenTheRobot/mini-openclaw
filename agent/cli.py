@@ -60,6 +60,16 @@ def _print_markdown(text: str) -> None:
         print(text)
 
 
+def _print_run_status(status: str) -> None:
+    """Make a degraded single-agent run visible despite having an answer."""
+    messages = {
+        "success": "[运行状态] success：任务正常完成。",
+        "partial": "[运行状态] partial：已交付基于已有证据的结果，但部分工具步骤未完成；请查看 Trace/诊断。",
+        "failed": "[运行状态] failed：任务未能生成可靠结果；请查看 Trace/诊断。",
+    }
+    _print(messages.get(status, f"[运行状态] {status}"))
+
+
 def _unwrap_markdown_fence(text: str) -> str:
     match = re.fullmatch(r"\s*```(?:markdown|md)?\s*\n(.*?)\n```\s*", text, flags=re.S | re.I)
     return match.group(1) if match else text
@@ -458,6 +468,8 @@ def _interactive(
             else:
                 answer = agent.run(task)
             _print_markdown("\n" + answer)
+            if not multi_agent_enabled:
+                _print_run_status(agent.last_run_status)
             last_task, last_answer = task, answer
             last_turn_started_at = turn_started_at
         except KeyboardInterrupt:
@@ -605,6 +617,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     renderer.begin_turn()
     turn_started_at = time.time()
+    run_status: str | None = None
     if args.multi_agent:
         from agent.subagents import run_multi_agent
         answer = run_multi_agent(
@@ -638,9 +651,13 @@ def main(argv: list[str] | None = None) -> int:
                 permission_manager=manager,
             )
             answer = vision_agent.run(args.task, image_paths=args.image)
+            run_status = vision_agent.last_run_status
         else:
             answer = agent.run(args.task)
+            run_status = agent.last_run_status
     _print_markdown(answer)
+    if run_status is not None:
+        _print_run_status(run_status)
     if args.audit or args.review:
         _audit(backend, tracer, args.task, answer, renderer.audit_evidence())
     _print(f"\n[Trace] {trace_path}")

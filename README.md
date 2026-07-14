@@ -168,7 +168,7 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 - `bash`：在当前工作目录执行 shell 命令，返回 stdout、stderr 和 return code；高危 shell 命令在工具层兜底拒绝，Linux/WSL 下优先使用 `bwrap` 沙箱。
 - `edit`：基于唯一 `old` 片段做局部替换，避免误改多处。
 - `grep`：基于 ripgrep 搜索文件内容，返回文件和行号。
-- `glob`：按通配模式递归查找文件。
+- `glob`：在工作目录内的相对 `path` 下按通配模式递归查找文件；默认从 `.` 查找，并拒绝绝对路径或 `..` 越界。
 - `pdf_metadata` / `pdf_extract_text`：读取 PDF 元数据和正文，按 GPU 条件选择 Marker/MarkItDown，并保存相对路径图片素材。
 - `paper_figure_analyze`：调用视觉后端分析 PDF 生成的 figure/table 图片，遵循 `paper-figure-reader` Skill。
 - `schedule_task`：创建、查看、暂停、恢复、删除或立即执行相对路径科研任务。
@@ -207,7 +207,7 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 
 - 工具调用评测：支持 JSON 合法率、工具选择正确率、参数正确率等指标。
 - 端到端任务样例：包含读配置、列目录、查 DOI、生成 hello 脚本、TODO 报告等任务结构。
-- 轨迹记录与回放：每次运行记录根 Agent span、LLM span 和工具 span（含父子关联、耗时、token、工具调用 ID 与已脱敏摘要）；支持旧版 JSONL 兼容读取。
+- 轨迹记录与回放：每次运行记录根 Agent span、LLM span 和工具 span（含父子关联、耗时、token、工具调用 ID 与已脱敏摘要）；`summary` 还会明确给出 `run_status`（`success`/`partial`/`failed`）；支持旧版 JSONL 兼容读取。
 - Trace CLI：`python -m eval.trace_cli {summary,cost,replay,render,simulate,diagnose} traces/<name>.jsonl`；交互 CLI 支持 `/trace`、`/trace replay`、`/trace cost`、`/trace diagnose`、`/trace html`。
 - 安全 replay：`replay` 和 `simulate` 只消费已保存的 Trace，不会再次调用模型或执行工具；HTML 渲染会转义 Trace 内容。
 - 缓存可观测性：LLM span 记录稳定 system 前缀摘要；Skill 上下文会在首轮前写入 system，运行中新增上下文改写为用户消息，避免破坏可复用前缀。

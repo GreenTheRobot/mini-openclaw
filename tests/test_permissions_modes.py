@@ -47,3 +47,9 @@ def test_task_grant_expires_but_session_grant_persists(tmp_path: Path):
 
 def test_plan_denies_unknown_external_tools(tmp_path: Path):
     assert check("mcp__unknown", {}, tmp_path, mode="plan").verdict == "deny"
+
+
+def test_glob_permission_allows_relative_path_and_rejects_escape(tmp_path: Path):
+    assert check("glob", {"pattern": "**/*.py", "path": "demo/project"}, tmp_path).verdict == "allow"
+    assert check("glob", {"pattern": "**/*.py", "path": "../outside"}, tmp_path).verdict == "deny"
+    assert check("glob", {"pattern": "../*.py", "path": "."}, tmp_path).verdict == "deny"

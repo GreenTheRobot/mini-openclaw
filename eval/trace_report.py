@@ -181,7 +181,10 @@ def summarize(path: str | Path, include_children: bool = False) -> dict[str, Any
     known_prefixes = [digest for digest in prefix_digests if digest]
     adjacent_pairs = max(0, len(known_prefixes) - 1)
     matching_pairs = sum(1 for left, right in zip(known_prefixes, known_prefixes[1:]) if left == right)
+    final = next((record for record in reversed(records) if record.get("event") == "run_end"), {})
     return {
+        "run_status": final.get("status", "unknown"),
+        "run_reason": final.get("reason", ""),
         "events": len(records),
         "trace_files": len(_trace_paths(path, include_children)),
         "spans": len(spans),

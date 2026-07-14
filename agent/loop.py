@@ -370,6 +370,7 @@ class AgentLoop:
         self._emit(
             "error_budget_exhausted",
             consecutive_errors=consecutive_errors,
+            error_budget_unit="model_turn",
             successful_tools=successful_tools,
             categories=error_categories,
         )
@@ -377,6 +378,7 @@ class AgentLoop:
             self.tracer.log_event(
                 "error_budget_exhausted",
                 consecutive_errors=consecutive_errors,
+                error_budget_unit="model_turn",
                 successful_tools=successful_tools,
                 categories=error_categories,
             )
@@ -386,7 +388,7 @@ class AgentLoop:
             successful_tools=successful_tools,
             fallback_turn=turn + 2,
             reason="tool_error_budget",
-            heading=f"连续 {consecutive_errors} 次工具失败，停止探索并交付结果",
+            heading=f"连续 {consecutive_errors} 轮工具调用均失败，停止探索并交付结果",
         )
     def run(self, user_task: str, image_paths: list[str] | None = None) -> str:
         user_task = clean_text(user_task)
@@ -516,6 +518,10 @@ class AgentLoop:
                     self.tracer.finish_run(status=self.last_run_status, turns=turn + 1)
                 return answer or "[模型未返回内容，任务失败]"
 
+            # 同一条模型回复可能声明多个工具调用。恢复预算按“整轮是否完全
+            # 失败”计数，避免同一个 schema 问题在一轮内耗尽所有恢复机会。
+            turn_had_success = False
+            turn_error_categories: list[str] = []
             for call in tool_calls:
                 call_name = str(call.get("name", ""))
                 if call_name in RESEARCH_DISCOVERY_TOOLS:
@@ -535,23 +541,28 @@ class AgentLoop:
                 ) if self.tracer else None
                 self._emit("tool_start", name=call_name, arguments=arguments)
                 if tool is None:
+                    error_category = "unknown_tool"
                     obs = self._error(call_name, "unknown_tool", "工具未注册")
                 elif not isinstance(arguments, dict):
+                    error_category = "invalid_arguments"
                     obs = self._error(call_name, "invalid_arguments", "arguments 必须是对象")
                 else:
                     validation_errors = tool.validate(arguments)
                     signature = json.dumps([call_name, arguments], ensure_ascii=False, sort_keys=True)
                     repeated_calls[signature] += 1
                     if validation_errors:
+                        error_category = "schema_validation"
                         obs = self._error(call_name, "schema_validation", "; ".join(validation_errors))
                     elif call_name in REUSABLE_OBSERVATION_TOOLS and signature in reusable_observations:
                         success = True
+                        error_category = "ok"
                         obs = (
                             "[已复用此前相同调用的成功 observation；请基于该结果继续，"
                             "不要再次使用完全相同的参数。]\n"
                             + reusable_observations[signature]
                         )
                     elif repeated_calls[signature] > self.max_repeated_call:
+                        error_category = "repeated_call"
                         obs = self._error(
                             call_name, "repeated_call",
                             f"相同调用已出现 {repeated_calls[signature]} 次",
@@ -561,6 +572,7 @@ class AgentLoop:
                         try:
                             decision = self.permission_manager.decide(call_name, arguments, self.workdir)
                             if decision.verdict == "deny":
+                                error_category = "permission_denied"
                                 obs = self._error(call_name, "permission_denied", decision.reason, False, "请求用户调整任务")
                             elif decision.verdict == "confirm":
                                 response: bool | str | permissions.ConfirmationResponse = self.auto_approve
@@ -573,6 +585,7 @@ class AgentLoop:
                                 else:
                                     approved, scope = bool(response), "once"
                                 if not approved:
+                                    error_category = "confirmation_required"
                                     obs = self._error(call_name, "confirmation_required", decision.reason, True, "请求用户确认或选择只读方案")
                                 else:
                                     self.permission_manager.grant(decision, scope)
@@ -592,11 +605,9 @@ class AgentLoop:
                     reusable_observations.setdefault(signature, str(obs))
                 if success:
                     successful_tools += 1
-                    consecutive_errors = 0
-                    error_categories.clear()
+                    turn_had_success = True
                 else:
-                    consecutive_errors += 1
-                    error_categories.append(error_category)
+                    turn_error_categories.append(error_category)
                     if call_name in FILE_MUTATION_TOOLS and isinstance(arguments, dict):
                         parsed_error = _parse_tool_error_fields(str(obs))
                         failed_file_mutations.append({
@@ -611,12 +622,16 @@ class AgentLoop:
                     "tool_call_id": call.get("id") or call_name,
                     "content": self._observation_content(turn + 1, call_name, str(obs)),
                 })
-                self._emit("tool_result", name=call_name, success=success, observation=str(obs))
+                self._emit(
+                    "tool_result", name=call_name, success=success,
+                    category=error_category, observation=str(obs),
+                )
                 if self.tracer:
                     self.tracer.log_event(
                         "tool_result", step=turn + 1, tool=call_name, tool_call_id=call.get("id") or call_name,
                         arguments=arguments,
                         success=success,
+                        category=error_category,
                         duration_ms=round((time.perf_counter() - tool_started) * 1000, 2),
                         observation=str(obs)[:1000],
                     )
@@ -626,6 +641,14 @@ class AgentLoop:
                             output=obs,
                             attributes={"category": error_category},
                         )
+            if turn_had_success:
+                consecutive_errors = 0
+                error_categories.clear()
+            else:
+                consecutive_errors += 1
+                for category in dict.fromkeys(turn_error_categories):
+                    if category not in error_categories:
+                        error_categories.append(category)
             # 等本批 assistant 声明的全部 tool_calls 都回填结果后再停止探索，
             # 避免把不完整的 assistant/tool 协议保留到跨轮会话历史中。
             if consecutive_errors >= self.max_consecutive_errors:

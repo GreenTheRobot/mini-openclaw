@@ -252,7 +252,7 @@ def test_error_budget_produces_partial_answer_from_existing_evidence(tmp_path: P
     trace = tmp_path / "error-budget.jsonl"
     loop = AgentLoop(
         backend, registry, "system", workdir=tmp_path,
-        auto_approve=True, tracer=Tracer(trace), max_consecutive_errors=4,
+        auto_approve=True, tracer=Tracer(trace), max_consecutive_errors=2,
     )
 
     answer = loop.run("研究项目")
@@ -265,9 +265,61 @@ def test_error_budget_produces_partial_answer_from_existing_evidence(tmp_path: P
         for line in trace.read_text(encoding="utf-8").splitlines()
     ]
     assert any(record.get("event") == "error_budget_exhausted" for record in records)
+    event = next(record for record in records if record.get("event") == "error_budget_exhausted")
+    assert event["error_budget_unit"] == "model_turn"
     assert records[-1]["event"] == "run_end"
     assert records[-1]["status"] == "partial"
     assert records[-1]["reason"] == "tool_error_budget"
+
+
+def test_one_batch_of_schema_failures_does_not_exhaust_recovery_budget(tmp_path: Path):
+    import json
+
+    class Backend:
+        supports_tools = True
+
+        def __init__(self):
+            self.turn = 0
+            self.fallback_called = False
+
+        def chat(self, messages, tools=None):
+            if tools == []:
+                self.fallback_called = True
+                return {"content": "不应在第一轮失败后提前兜底", "tool_calls": []}
+            self.turn += 1
+            if self.turn == 1:
+                return {"content": "", "tool_calls": [
+                    {"id": f"bad-{index}", "name": "strict", "arguments": {"unexpected": index}}
+                    for index in range(4)
+                ]}
+            if self.turn == 2:
+                return {"content": "", "tool_calls": [
+                    {"id": "good", "name": "strict", "arguments": {"text": "fixed"}},
+                ]}
+            return {"content": "已在下一轮修正参数并完成读取。", "tool_calls": []}
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "strict", "", {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+            "additionalProperties": False,
+        }, lambda text: text,
+    ))
+    backend = Backend()
+    trace = tmp_path / "schema-batch.jsonl"
+    loop = AgentLoop(backend, registry, "system", workdir=tmp_path, auto_approve=True, tracer=Tracer(trace))
+
+    assert loop.run("读取代码") == "已在下一轮修正参数并完成读取。"
+    assert backend.turn == 3
+    assert backend.fallback_called is False
+    assert loop.last_run_status == "success"
+    records = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+    failures = [record for record in records if record.get("event") == "tool_result" and not record.get("success")]
+    assert len(failures) == 4
+    assert {record.get("category") for record in failures} == {"schema_validation"}
+    assert not any(record.get("event") == "error_budget_exhausted" for record in records)
 
 
 def test_loop_rejects_status_only_research_answer(tmp_path: Path):

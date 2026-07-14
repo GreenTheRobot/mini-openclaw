@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import json
 import os
 
-from agent.cli import _build_parser, _ensure_session_todo_path, _prepare_turn_context, _runtime_context
+from agent.cli import _build_parser, _ensure_session_todo_path, _prepare_turn_context, _print_run_status, _runtime_context
 from agent.memory import Memory
 from agent.ui import EventRenderer
 
@@ -30,6 +30,27 @@ def test_quiet_renderer_hides_tool_arguments_but_steps_reveals_summary():
     steps = renderer.steps_markdown()
     assert "web_fetch" in steps
     assert "page content" in steps
+
+
+def test_quiet_renderer_shows_one_failure_category_per_model_turn():
+    output = []
+    renderer = EventRenderer(output.append, verbose=False)
+    renderer.begin_turn()
+    renderer("model_start", {"turn": 1})
+    renderer("tool_result", {"name": "glob", "success": False, "category": "schema_validation"})
+    renderer("tool_result", {"name": "glob", "success": False, "category": "schema_validation"})
+    renderer("tool_result", {"name": "glob", "success": False, "category": "path_not_found"})
+
+    text = "\n".join(output)
+    assert text.count("schema_validation") == 1
+    assert "path_not_found" in text
+
+
+def test_run_status_makes_partial_result_visible(monkeypatch):
+    output = []
+    monkeypatch.setattr("agent.cli._print", output.append)
+    _print_run_status("partial")
+    assert "[运行状态] partial" in output[0]
 
 
 def test_verbose_renderer_shows_observable_tool_events():

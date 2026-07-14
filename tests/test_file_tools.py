@@ -24,6 +24,23 @@ def test_glob_ignores_dependency_directories(tmp_path: Path, monkeypatch):
     assert "node_modules" not in result
 
 
+def test_glob_scopes_to_relative_path_and_rejects_escape(tmp_path: Path, monkeypatch):
+    (tmp_path / "demo" / "project").mkdir(parents=True)
+    (tmp_path / "demo" / "project" / "train.py").write_text("print('train')", encoding="utf-8")
+    (tmp_path / "outside.py").write_text("print('outside')", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = _glob("**/*.py", path="demo/project")
+    escaped = _glob("**/*.py", path="../")
+    escaped_pattern = _glob("../*.py", path="demo/project")
+
+    assert str(result).replace("\\", "/") == "demo/project/train.py"
+    assert escaped.success is False
+    assert escaped.category == "path_outside_workdir"
+    assert escaped_pattern.success is False
+    assert escaped_pattern.category == "pattern_outside_workdir"
+
+
 def test_edit_rejects_empty_or_nonunique_match(tmp_path: Path):
     path = tmp_path / "sample.txt"
     path.write_text("same\nsame\n", encoding="utf-8")

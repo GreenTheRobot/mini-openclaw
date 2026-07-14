@@ -67,12 +67,19 @@ def _path_decision(args: dict[str, Any], workdir: Path, *, confirm: bool) -> Per
     return PermissionDecision("allow", f"访问工作目录内文件：{path}")
 
 
-def _glob_decision(args: dict[str, Any]) -> PermissionDecision:
+def _glob_decision(args: dict[str, Any], workdir: Path) -> PermissionDecision:
     pattern = str(args.get("pattern", ""))
     parts = Path(pattern).parts
     if Path(pattern).is_absolute() or ".." in parts:
         return PermissionDecision("deny", f"glob pattern 不允许越过工作目录：{pattern}")
-    return PermissionDecision("allow", "glob 限定在工作目录递归查找")
+    raw_path = str(args.get("path", ".") or ".")
+    path = Path(raw_path)
+    if path.is_absolute() or ".." in path.parts:
+        return PermissionDecision("deny", f"glob path 必须是工作目录内的相对路径：{raw_path}")
+    target = _resolve_in_workdir(raw_path, workdir)
+    if not _is_inside(target, workdir):
+        return PermissionDecision("deny", f"glob path 越过工作目录：{raw_path}")
+    return PermissionDecision("allow", f"glob 限定在工作目录子目录：{raw_path}")
 
 
 def _bash_decision(args: dict[str, Any]) -> PermissionDecision:
@@ -137,7 +144,7 @@ def check(tool: str, args: dict[str, Any], workdir: Path, *, mode: str = "defaul
         raise ValueError(f"未知权限模式：{mode}")
 
     if tool == "glob":
-        return _glob_decision(args)
+        return _glob_decision(args, workdir)
     if tool == "read":
         return _path_decision(args, workdir, confirm=False)
     if tool == "grep":
