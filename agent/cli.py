@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -155,7 +156,23 @@ def _runtime_context(now: datetime | None = None) -> str:
         "不得用旧年份搜索结果冒充近期结果。"
     )
 
-def _prepare_turn_context(agent: Any, task: str, skills: list[Any], planning: bool) -> None:
+def _prepare_turn_context(agent: Any, task: str, skills: list[Any], planning: bool,
+                          memory_enabled: bool = True) -> None:
+    if memory_enabled:
+        try:
+            from agent.memory import Memory
+            recalled = Memory("MEMORY.md").recall()
+            if recalled.strip():
+                digest = hashlib.sha256(recalled.encode("utf-8")).hexdigest()[:12]
+                agent.add_context(
+                    f"project-memory:{digest}",
+                    "# 项目长期记忆（本轮从磁盘读取，相关时遵循）\n" + recalled,
+                )
+        except Exception as exc:
+            agent.add_context(
+                f"project-memory-load-error:{time.time_ns()}",
+                f"# 项目长期记忆加载失败\n{exc}",
+            )
     if planning:
         from agent.planner import planning_guidance
         guidance = planning_guidance(task)
@@ -237,6 +254,7 @@ def _interactive(
     planning_enabled: bool,
     renderer: EventRenderer,
     legacy_review_requested: bool = False,
+    memory_enabled: bool = True,
 ) -> int:
     manager = agent.permission_manager
     _show_intro(registry, skills, trace_path, manager, renderer)
@@ -354,7 +372,10 @@ def _interactive(
             _print(f"未知命令：{command}；输入 /help 查看帮助。")
             continue
 
-        _prepare_turn_context(agent, task, skills, planning_enabled)
+        _prepare_turn_context(
+            agent, task, skills, planning_enabled,
+            memory_enabled=memory_enabled,
+        )
         renderer.begin_turn()
         try:
             answer = agent.run(task)
@@ -446,15 +467,6 @@ def main(argv: list[str] | None = None) -> int:
     if skills:
         from skills.loader import skills_catalog
         system += "\n\n# 可用 Skills（需要时按流程执行）\n" + skills_catalog(skills)
-    if args.ablation != "no-memory":
-        try:
-            from agent.memory import Memory
-            recalled = Memory("MEMORY.md").recall()
-            if recalled.strip():
-                system += "\n\n# 项目长期记忆（相关时遵循）\n" + recalled
-        except Exception as exc:
-            _print(f"[提示] 记忆未加载：{exc}")
-
     from eval.tracer import Tracer
     trace_path = Path(args.trace) if args.trace else Path("traces") / time.strftime("session-%Y%m%d-%H%M%S.jsonl")
     tracer = Tracer(trace_path)
@@ -477,9 +489,13 @@ def main(argv: list[str] | None = None) -> int:
         return _interactive(
             agent, backend, registry, tracer, trace_path, skills,
             planning_enabled, renderer, legacy_review_requested=args.review,
+            memory_enabled=args.ablation != "no-memory",
         )
 
-    _prepare_turn_context(agent, args.task, skills, planning_enabled)
+    _prepare_turn_context(
+        agent, args.task, skills, planning_enabled,
+        memory_enabled=args.ablation != "no-memory",
+    )
     renderer.begin_turn()
     answer = agent.run(args.task, image_paths=args.image)
     _print_markdown(answer)

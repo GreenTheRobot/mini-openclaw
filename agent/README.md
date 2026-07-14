@@ -12,6 +12,12 @@
 
 交互中可使用 `/mode`、`/permissions`、`/steps`、`/audit` 和 `/verbose on|off`。
 
+## 跨会话长期记忆
+
+长期记忆分为两层：`MEMORY.md` 是人可读的项目记忆，由 `remember` 工具追加条目；`memory.json` 是结构化键值记忆，由 `KVMemory` 维护覆盖、召回和遗忘语义。`/memory` 会直接读取磁盘上的 `MEMORY.md`，新进程启动或当前会话下一轮任务都会重新读取最新磁盘记忆并**按内容 hash 去重**将新内容注入上下文，这样多个agent进程同时工作时，每个 agent 仍能读到其他 agent 新写入的内容；`--ablation no-memory` 会关闭这一路径。
+
+并发写入使用 `agent.memory` 内部的跨平台 lock-file：对同一个记忆文件会创建 `<filename>.lock`，通过原子创建锁文件串行化读写，并在锁陈旧（距离最后修改时间超过5min）后自动清理，避免崩溃进程永久占用。Markdown 记忆在锁内追加，KV 记忆在锁内重新读取、合并、写入唯一临时文件并用 `os.replace` 原子替换，避免两个会话各自持有旧快照时出现 lost update。所有写入前都会清理非法 surrogate，保证记忆文件可用 UTF-8 稳定读写。
+
 ## 上下文压缩
 
 压缩采用本地版结构：

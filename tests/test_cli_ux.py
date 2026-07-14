@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
-from agent.cli import _build_parser, _runtime_context
+from agent.cli import _build_parser, _prepare_turn_context, _runtime_context
+from agent.memory import Memory
 from agent.ui import EventRenderer
 
 
@@ -41,3 +42,18 @@ def test_runtime_context_resolves_recent_week_to_exact_dates():
     assert "2026-07-13" in context
     assert "2026-07-06" in context
     assert "最近一周" in context
+
+
+def test_turn_context_loads_latest_disk_memory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Memory("MEMORY.md").write("跨会话约定：报告先写结论")
+    loaded = {}
+
+    class DummyAgent:
+        def add_context(self, key, content):
+            loaded[key] = content
+
+    _prepare_turn_context(DummyAgent(), "写报告", [], planning=False)
+
+    assert any(key.startswith("project-memory:") for key in loaded)
+    assert "跨会话约定：报告先写结论" in "\n".join(loaded.values())
