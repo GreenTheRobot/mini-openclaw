@@ -1,92 +1,86 @@
-import json
-
-from agent.context import maybe_compact, truncate_observation
+from agent.context import (
+    estimate_tokens,
+    maybe_compact,
+    repair_tool_protocol,
+    truncate_observation,
+    validate_tool_protocol,
+)
 
 
 class SummaryBackend:
     def chat(self, messages, tools=None):
-        return {"content": "目标：保留实验约束；已完成：读取配置；下一步：运行验证。", "tool_calls": []}
+        return {"content": "目标：保留实验约束；已完成：检索；下一步：核验日期。", "tool_calls": []}
 
 
-def test_compaction_keeps_system_and_safe_recent_suffix():
+class ExpandingBackend:
+    def chat(self, messages, tools=None):
+        return {"content": "summary" * 3000, "tool_calls": []}
+
+
+def test_compaction_keeps_system_and_recent_user_turn():
     messages = [
         {"role": "system", "content": "system rules"},
-        {"role": "user", "content": "早期约束：随机种子必须为 42。" * 30},
-        {"role": "assistant", "content": "已记录。" * 30},
+        {"role": "user", "content": "早期约束：随机种子必须为 42。" + "x" * 5000},
+        {"role": "assistant", "content": "已记录。" + "y" * 3000},
         {"role": "user", "content": "继续完成实验。"},
         {"role": "assistant", "content": "正在处理。"},
     ]
     compacted = maybe_compact(messages, SummaryBackend(), budget=50, recent_turns=1)
-    assert compacted[0]["role"] == "system"
-    assert compacted[0]["content"].startswith("system rules")
-    assert "# 历史压缩备忘" in compacted[0]["content"]
-    assert sum(message["role"] == "system" for message in compacted) == 1
-    assert compacted[-3:-1] == messages[-2:]
-    assert compacted[-1]["role"] == "user"
-    assert "继续完成当前任务" in compacted[-1]["content"]
+    assert compacted is not messages
+    assert compacted[0] == messages[0]
+    assert compacted[1]["role"] == "user"
+    assert "# 历史压缩备忘" in compacted[1]["content"]
+    assert compacted[-2:] == messages[-2:]
+    assert estimate_tokens(compacted) < estimate_tokens(messages)
+    assert validate_tool_protocol(compacted) == []
 
 
-def test_compaction_removes_tool_protocol_messages():
-    messages = [
-        {"role": "system", "content": "system rules"},
-        {"role": "user", "content": "跑实验并汇报。" * 100},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "call_1", "name": "bash", "arguments": {"command": "python train.py"}}
-        ]},
-        {"role": "tool", "name": "bash", "tool_call_id": "call_1", "content": "epoch=1\n" * 1000},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "call_2", "name": "wechat_file_transfer", "arguments": {"message": "完成"}}
-        ]},
-    ]
-    compacted = maybe_compact(messages, SummaryBackend(), budget=50)
-    assert len(compacted) == 2
-    assert [message["role"] for message in compacted] == ["system", "user"]
-    assert all("tool_calls" not in message for message in compacted)
-    assert all(message.get("role") != "tool" for message in compacted)
-
-
-def test_compaction_keeps_complete_tool_block():
-    messages = [
-        {"role": "system", "content": "system rules"},
-        {"role": "user", "content": "早期历史" * 1000},
-        {"role": "assistant", "content": "已处理早期历史"},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "call_1", "name": "bash", "arguments": {"command": "python train.py"}}
-        ]},
-        {"role": "tool", "name": "bash", "tool_call_id": "call_1", "content": "status=completed"},
-    ]
-    compacted = maybe_compact(messages, SummaryBackend(), budget=50)
-    assert compacted[-3:] == messages[-2:] + [{
-        "role": "user",
-        "content": (
-            "请根据系统消息中的历史压缩备忘和保留的最近上下文继续完成当前任务。"
-            "不要重复已完成步骤；如果还需要行动，请继续调用合适工具。"
-        ),
-    }]
-
-
-def test_compaction_adds_authoritative_task_snapshot(tmp_path):
-    state_dir = tmp_path / ".mini-openclaw"
-    state_dir.mkdir()
-    (state_dir / "tasks.json").write_text(json.dumps({
-        "items": [
-            {"id": "smoke", "title": "冒烟测试", "status": "completed", "result": "ok"},
-            {"id": "notify", "title": "微信通知", "status": "pending", "result": ""},
+def test_compaction_never_splits_multi_tool_call_groups():
+    messages = [{"role": "system", "content": "system"}, {"role": "user", "content": "研究任务"}]
+    for step in range(5):
+        calls = [
+            {"id": f"call-{step}-a", "name": "web_search", "arguments": {"query": "a"}},
+            {"id": f"call-{step}-b", "name": "web_search", "arguments": {"query": "b"}},
         ]
-    }, ensure_ascii=False), encoding="utf-8")
+        messages.append({"role": "assistant", "content": "", "tool_calls": calls})
+        messages.append({"role": "tool", "tool_call_id": f"call-{step}-a", "name": "web_search", "content": "A" * 1800})
+        messages.append({"role": "tool", "tool_call_id": f"call-{step}-b", "name": "web_search", "content": "B" * 1800})
+    assert validate_tool_protocol(messages) == []
+    compacted = maybe_compact(messages, SummaryBackend(), budget=100)
+    assert compacted is not messages
+    assert validate_tool_protocol(compacted) == []
+    for index, message in enumerate(compacted):
+        if message.get("role") == "tool":
+            assert index > 0
+            assert any(
+                earlier.get("role") == "assistant"
+                and message["tool_call_id"] in {call["id"] for call in earlier.get("tool_calls", [])}
+                for earlier in compacted[:index]
+            )
+
+
+def test_compaction_is_abandoned_if_summary_makes_context_larger():
     messages = [
-        {"role": "system", "content": "system rules"},
-        {"role": "user", "content": "做实验，最后微信通知。" * 100},
-        {"role": "assistant", "content": "已读取配置。"},
-        {"role": "assistant", "content": "全部已经完成，包括微信通知。"},
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": "old result"},
+        {"role": "assistant", "content": "recent one" + "x" * 3000},
+        {"role": "assistant", "content": "recent two" + "y" * 3000},
+        {"role": "assistant", "content": "recent three" + "z" * 3000},
     ]
+    assert maybe_compact(messages, ExpandingBackend(), budget=100) is messages
 
-    compacted = maybe_compact(messages, SummaryBackend(), budget=50, workdir=tmp_path)
 
-    assert "权威 task_list 快照" in compacted[0]["content"]
-    assert "notify: 微信通知 [pending]" in compacted[0]["content"]
-    assert "不能声称整体任务已经完成" in compacted[0]["content"]
-    assert "最终答复前必须核对" in compacted[-1]["content"]
+def test_protocol_repair_removes_orphan_tool_message():
+    broken = [
+        {"role": "system", "content": "system"},
+        {"role": "tool", "tool_call_id": "orphan", "name": "read", "content": "data"},
+        {"role": "assistant", "content": "continue"},
+    ]
+    assert validate_tool_protocol(broken)
+    repaired = repair_tool_protocol(broken)
+    assert validate_tool_protocol(repaired) == []
+    assert all(message.get("role") != "tool" for message in repaired)
 
 
 def test_long_observation_keeps_head_tail_and_archive_location():

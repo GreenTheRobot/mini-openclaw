@@ -1,119 +1,171 @@
-"""大模型后端：DeepSeek API 客户端（OpenAI 兼容）。
-
-本课程的 mini-OpenClaw 不本地部署模型，而是调用 DeepSeek API 作为"大脑"。
-DeepSeek 的接口与 OpenAI 完全兼容，所以下面用通用的 OpenAI 协议写法，
-只要改 base_url / api_key / model 就能换任意 OpenAI 兼容厂商。
-
-接口约定（和 FakeBackend 一致，主循环 agent/loop.py 只认这个）：
-    chat(messages, tools) -> {"role": "assistant", "content": str, "tool_calls": [ {name, arguments}, ... ]}
-
-环境变量：
-    DEEPSEEK_API_KEY   你的 key（千万别提交进 git！）
-    DEEPSEEK_BASE_URL  默认 https://api.deepseek.com
-    DEEPSEEK_MODEL     默认 deepseek-chat
-"""
+"""DeepSeek OpenAI-compatible chat backend."""
 from __future__ import annotations
-import os
+
 import json
+import os
 from typing import Any
 
 import httpx
+
+from agent.context import validate_tool_protocol
+
+
+class DeepSeekAPIError(RuntimeError):
+    def __init__(self, status_code: int, message: str, response_body: str = ""):
+        self.status_code = status_code
+        self.response_body = response_body
+        detail = f"DeepSeek API {status_code}: {message}"
+        if response_body:
+            detail += f"\n服务端响应：{response_body[:2000]}"
+        super().__init__(detail)
 
 
 class DeepSeekBackend:
     supports_tools = True
 
-    def __init__(self,
-                 api_key: str | None = None,
-                 base_url: str | None = None,
-                 model: str | None = None,
-                 timeout: float = 60.0):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+        timeout: float = 60.0,
+    ):
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
-        self.base_url = (base_url or os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")).rstrip("/")
+        self.base_url = (
+            base_url or os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+        ).rstrip("/")
         self.model = model or os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
         if not self.api_key:
             raise RuntimeError("缺少 DEEPSEEK_API_KEY 环境变量")
         self._client = httpx.Client(timeout=timeout)
 
-    def chat(self, messages: list[dict[str, Any]], tools: list[dict] | None = None,
-             temperature: float = 0.0) -> dict[str, Any]:
-        """一次（非流式）对话补全，返回归一化的 assistant 消息。"""
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict] | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        protocol_errors = validate_tool_protocol(messages)
+        if protocol_errors:
+            raise ValueError("发送前消息协议校验失败：" + "; ".join(protocol_errors))
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": self._to_openai_messages(messages),
             "temperature": temperature,
         }
         if tools:
-            payload["tools"] = tools           # OpenAI tools 格式，base.Tool.schema() 已生成
+            payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
-        resp = self._client.post(
+        response = self._client.post(
             f"{self.base_url}/v1/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}"},
             json=payload,
         )
-        resp.raise_for_status()
-        data = resp.json()
-        result = self._normalize(data["choices"][0]["message"])
+        if response.is_error:
+            body = self._error_body(response)
+            raise DeepSeekAPIError(response.status_code, response.reason_phrase, body)
+        data = response.json()
+        try:
+            result = self._normalize(data["choices"][0]["message"])
+        except (KeyError, IndexError, TypeError) as exc:
+            raise DeepSeekAPIError(
+                response.status_code,
+                "响应缺少 choices[0].message",
+                json.dumps(data, ensure_ascii=False)[:2000],
+            ) from exc
         result["usage"] = data.get("usage", {})
         result["model"] = data.get("model", self.model)
         return result
 
-    # --- 把内部 messages（含 role=tool）转成 OpenAI 标准格式 ---
+    @staticmethod
+    def _error_body(response: httpx.Response) -> str:
+        try:
+            data = response.json()
+            if isinstance(data, dict):
+                error = data.get("error")
+                if isinstance(error, dict):
+                    message = error.get("message") or error.get("type")
+                    if message:
+                        return str(message)
+            return json.dumps(data, ensure_ascii=False)
+        except Exception:
+            return response.text[:2000]
+
     def _to_openai_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        out = []
-        for m in messages:
-            role = m.get("role")
+        output = []
+        for message in messages:
+            role = message.get("role")
             if role == "tool":
-                # OpenAI 要求 tool 消息带 tool_call_id；最小实现可用 name 兜底
-                out.append({"role": "tool", "content": str(m.get("content", "")),
-                            "tool_call_id": m.get("tool_call_id", m.get("name", "tool"))})
-            elif role == "assistant" and m.get("tool_calls"):
-                out.append({"role": "assistant", "content": m.get("content") or None,
-                            "tool_calls": self._to_openai_tool_calls(m["tool_calls"])})
+                output.append({
+                    "role": "tool",
+                    "content": str(message.get("content", "")),
+                    "tool_call_id": str(message.get("tool_call_id", "")),
+                })
+            elif role == "assistant" and message.get("tool_calls"):
+                output.append({
+                    "role": "assistant",
+                    "content": message.get("content") or None,
+                    "tool_calls": self._to_openai_tool_calls(message["tool_calls"]),
+                })
             else:
-                out.append({"role": role,
-                            "content": self._to_openai_content(m.get("content", ""))})
-        return out
+                output.append({
+                    "role": role,
+                    "content": self._to_openai_content(message.get("content", "")),
+                })
+        return output
 
     @staticmethod
     def _to_openai_content(content: Any) -> Any:
-        """支持文本或 Anthropic 风格内容块列表，发送前转为 OpenAI 兼容格式。"""
         if not isinstance(content, list):
             return content
-
-        out = []
+        output = []
         for block in content:
             if block.get("type") == "text":
-                out.append({"type": "text", "text": block.get("text", "")})
+                output.append({"type": "text", "text": block.get("text", "")})
             elif block.get("type") == "image":
-                src = block.get("source", {})
-                media_type = src.get("media_type", "image/png")
-                data = src.get("data", "")
-                out.append({"type": "image_url",
-                            "image_url": {"url": f"data:{media_type};base64,{data}"}})
+                source = block.get("source", {})
+                media_type = source.get("media_type", "image/png")
+                data = source.get("data", "")
+                output.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{media_type};base64,{data}"},
+                })
             else:
-                out.append(block)
-        return out
+                output.append(block)
+        return output
 
     @staticmethod
     def _to_openai_tool_calls(calls: list[dict]) -> list[dict]:
-        out = []
-        for i, c in enumerate(calls):
-            out.append({"id": c.get("id", f"call_{i}"), "type": "function",
-                        "function": {"name": c["name"],
-                                     "arguments": json.dumps(c.get("arguments", {}), ensure_ascii=False)}})
-        return out
+        output = []
+        for index, call in enumerate(calls):
+            call_id = str(call.get("id") or f"call_{index}")
+            output.append({
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": call["name"],
+                    "arguments": json.dumps(call.get("arguments", {}), ensure_ascii=False),
+                },
+            })
+        return output
 
-    # --- 把 OpenAI 返回归一化成内部格式 ---
     @staticmethod
-    def _normalize(msg: dict[str, Any]) -> dict[str, Any]:
+    def _normalize(message: dict[str, Any]) -> dict[str, Any]:
         tool_calls = []
-        for tc in (msg.get("tool_calls") or []):
-            fn = tc.get("function", {})
+        for tool_call in message.get("tool_calls") or []:
+            function = tool_call.get("function", {})
             try:
-                args = json.loads(fn.get("arguments") or "{}")
+                arguments = json.loads(function.get("arguments") or "{}")
             except json.JSONDecodeError:
-                args = {}
-            tool_calls.append({"id": tc.get("id"), "name": fn.get("name"), "arguments": args})
-        return {"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls}
+                arguments = {}
+            tool_calls.append({
+                "id": tool_call.get("id"),
+                "name": function.get("name"),
+                "arguments": arguments,
+            })
+        return {
+            "role": "assistant",
+            "content": message.get("content") or "",
+            "tool_calls": tool_calls,
+        }

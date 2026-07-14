@@ -120,6 +120,8 @@ def build_default_registry() -> ToolRegistry:
     from .grep import grep_tool
     from .glob import glob_tool
     from .web import web_fetch_tool, web_search_tool
+    from .arxiv import arxiv_search_tool
+    from .download import download_file_tool
     from .wechat import wechat_file_transfer_tool
     from .memory import remember_tool
     from .task import task_list_tool
@@ -130,7 +132,7 @@ def build_default_registry() -> ToolRegistry:
     )
     for tool in (
         read_tool, write_tool, bash_tool, edit_tool, grep_tool, glob_tool,
-        web_search_tool, web_fetch_tool, wechat_file_transfer_tool,
+        arxiv_search_tool, web_search_tool, web_fetch_tool, download_file_tool, wechat_file_transfer_tool,
         remember_tool, task_list_tool, pdf_extract_text_tool, pdf_metadata_tool,
         experiment_prepare_tool, experiment_smoke_test_tool, experiment_start_tool,
         experiment_status_tool, experiment_report_tool,
