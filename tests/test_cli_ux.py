@@ -86,6 +86,20 @@ def test_quiet_renderer_shows_multi_agent_progress_without_tool_details():
     assert "paper content" not in visible
 
 
+def test_quiet_renderer_deduplicates_research_repair_notice():
+    output = []
+    renderer = EventRenderer(output.append, verbose=False)
+    renderer.begin_turn()
+
+    renderer("research_answer_repair", {"attempt": 1})
+    renderer("research_answer_repair", {"attempt": 2})
+    renderer("research_answer_repair", {"phase": "revision", "attempt": 1})
+
+    visible = "\n".join(output)
+    assert visible.count("补齐调研报告") == 1
+    assert "缺少必要来源或结构" not in visible
+
+
 def test_renderer_can_load_steps_from_trace_files(tmp_path):
     trace = tmp_path / "sub.jsonl"
     trace.write_text(

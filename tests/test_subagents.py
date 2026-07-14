@@ -200,6 +200,50 @@ class AssignmentBackend(NoToolBackend):
         return {"content": "ok", "tool_calls": []}
 
 
+class NoOpAssignmentBackend(NoToolBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.orchestration_user_message = ""
+        self.research_ran = False
+        self.engineering_ran = False
+        self.multimodal_ran = False
+
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        if "主 Agent" in system and "JSON" in system:
+            self.orchestration_user_message = str(messages[-1].get("content", ""))
+            return {"content": '{"use_subagents": true, "reason": "需要论文检索", "main_task": "", "assignments": {"research": "检索最近一周多模态压缩论文并保留来源", "engineering": "不需要", "multimodal": "不需要"}}', "tool_calls": []}
+        if "Research Agent" in system:
+            self.research_ran = True
+            return {
+                "content": (
+                    "最近一周论文检索报告\n"
+                    "严格匹配 1 篇。提交日期：2026-07-13。\n"
+                    "摘要：多模态模型压缩。解决问题：推理成本。核心方法：token 压缩。\n"
+                    "来源：https://arxiv.org/abs/2607.12345"
+                ),
+                "tool_calls": [],
+            }
+        if "Engineering Agent" in system:
+            self.engineering_ran = True
+            return {"content": "should not run", "tool_calls": []}
+        if "Multimodal Agent" in system:
+            self.multimodal_ran = True
+            return {"content": "should not run", "tool_calls": []}
+        if "coordinator" in system:
+            return {
+                "content": (
+                    "最近一周论文检索报告\n"
+                    "严格匹配 1 篇。提交日期：2026-07-13。\n"
+                    "摘要：多模态模型压缩。解决问题：推理成本。核心方法：token 压缩。\n"
+                    "来源：https://arxiv.org/abs/2607.12345"
+                ),
+                "tool_calls": [],
+            }
+        if "Reviewer" in system or "Reviewer" in str(messages):
+            return {"content": "审查结论：通过。", "tool_calls": []}
+        return {"content": "ok", "tool_calls": []}
+
 class EngineeringToolBackend(NoToolBackend):
     def __init__(self) -> None:
         super().__init__()
@@ -475,6 +519,39 @@ def test_multi_agent_emits_live_progress_events(tmp_path: Path):
     assert "review_start" in event_names
     assert "review_done" in event_names
 
+
+def test_noop_assignments_are_not_started_and_planner_gets_runtime_date(tmp_path: Path):
+    backend = NoOpAssignmentBackend()
+    events = []
+    system = (
+        "system\n\n# 运行时日期\n"
+        "当前本地日期为 2026-07-14，时区为 Asia/Shanghai. "
+        "用户说‘最近一周’时，默认使用 2026-07-07 至 2026-07-14 的明确范围。\n"
+        "处理最新/近期论文时必须核验论文页面的发布日期或最近更新日期；"
+        "不得用旧年份搜索结果冒充近期结果。"
+    )
+
+    answer = run_multi_agent(
+        task="找最近一周多模态模型压缩的新论文",
+        backend=backend,
+        registry=ToolRegistry(),
+        system_prompt=system,
+        workdir=tmp_path,
+        trace_path=tmp_path / "trace.jsonl",
+        parent_run_id="parent",
+        event_callback=lambda event, payload: events.append((event, payload)),
+    )
+
+    assert "https://arxiv.org/abs/2607.12345" in answer
+    assert "当前本地日期为 2026-07-14" in backend.orchestration_user_message
+    assert backend.research_ran is True
+    assert backend.engineering_ran is False
+    assert backend.multimodal_ran is False
+    started_roles = [payload.get("role") for event, payload in events if event == "subagent_start"]
+    assert started_roles == ["Research Agent"]
+    orchestration_events = [payload for event, payload in events if event == "orchestration"]
+    assert orchestration_events[0]["assignments"]["engineering"] == ""
+    assert orchestration_events[0]["assignments"]["multimodal"] == ""
 
 def test_engineering_agent_receives_full_tool_registry(tmp_path: Path):
     backend = EngineeringToolBackend()

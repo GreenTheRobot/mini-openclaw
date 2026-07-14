@@ -84,7 +84,8 @@ def _bash(command: str, timeout: int = 30) -> ToolResult:
     cmd, use_shell = _build_command(command)
     try:
         process = subprocess.run(
-            cmd, shell=use_shell, capture_output=True, text=True, timeout=timeout,
+            cmd, shell=use_shell, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         return ToolResult(f"[超时] 命令超过 {timeout}s 未结束：{command}", False, "timeout")

@@ -15,11 +15,13 @@ class EventRenderer:
         self.last_events: list[tuple[str, dict[str, Any]]] = []
         self._working_shown = False
         self._reported_failures: set[tuple[str, str, str]] = set()
+        self._reported_research_repair = False
 
     def begin_turn(self) -> None:
         self.last_events = []
         self._working_shown = False
         self._reported_failures = set()
+        self._reported_research_repair = False
 
     def set_verbose(self, enabled: bool) -> None:
         self.verbose = enabled
@@ -61,7 +63,9 @@ class EventRenderer:
         elif event == "revision_start":
             self.print_fn("  ● 主 Agent 正在按内部审核意见修订最终答案。")
         elif event == "research_answer_repair":
-            self.print_fn("  ● 调研答案缺少必要来源或结构，正在重写最终报告。")
+            if not self._reported_research_repair:
+                self._reported_research_repair = True
+                self.print_fn("  ● 正在补齐调研报告的来源或结构。")
         elif event == "tool_result" and not payload.get("success"):
             role = f"{payload.get('role')} 的 " if payload.get("role") else ""
             category = str(payload.get("category") or "unknown_error")

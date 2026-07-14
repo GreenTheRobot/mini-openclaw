@@ -1,4 +1,3 @@
-from datetime import date
 from pathlib import Path
 
 from agent.loop import AgentLoop
@@ -481,6 +480,42 @@ def test_loop_rejects_linkless_literature_research_answer(tmp_path: Path):
     assert "insufficient_research_answer" in trace.read_text(encoding="utf-8")
 
 
+def test_literature_report_accepts_equivalent_field_names(tmp_path: Path):
+    class EquivalentReportBackend:
+        def __init__(self):
+            self.turn = 0
+
+        def chat(self, messages, tools=None):
+            self.turn += 1
+            return {
+                "content": (
+                    "# 最近一周多模态压缩论文\n\n"
+                    "检索范围：2026-07-07 至 2026-07-14。匹配论文 1 篇。\n\n"
+                    "## Efficient Multimodal Token Compression\n"
+                    "- 作者：Alice Zhang 等\n"
+                    "- 日期：2026-07-13\n"
+                    "- 方向：多模态模型压缩与视觉 token 裁剪\n"
+                    "- 摘要概括：这篇工作研究如何减少视觉 token 数量，同时保留跨模态理解能力。\n"
+                    "- 目标问题：多模态大模型推理时视觉 token 带来的显存和计算开销过高。\n"
+                    "- 方法思路：先估计视觉 token 信息量，再保留对语言生成最有帮助的 token，并在跨模态层继续对齐。\n"
+                    "- 主要结论：在若干视觉问答和图文理解任务上降低计算量，同时保持主要性能。\n"
+                    "- 链接：https://arxiv.org/abs/2607.12345\n\n"
+                    "## 检索说明\n使用 arXiv 日期过滤和 multimodal compression / visual token compression 关键词。"
+                ),
+                "tool_calls": [],
+            }
+
+    trace = tmp_path / "equivalent-literature.jsonl"
+    backend = EquivalentReportBackend()
+    loop = AgentLoop(backend, ToolRegistry(), "system", workdir=tmp_path, tracer=Tracer(trace))
+
+    answer = loop.run("找最近一周多模态模型压缩的新论文")
+
+    assert "https://arxiv.org/abs/2607.12345" in answer
+    assert backend.turn == 1
+    assert "insufficient_research_answer" not in trace.read_text(encoding="utf-8")
+
+
 def test_loop_blocks_final_answer_while_todo_has_open_items(tmp_path: Path):
     seen_messages = []
 
@@ -614,15 +649,80 @@ def test_recent_literature_web_search_is_routed_to_arxiv(tmp_path: Path):
         fake_arxiv_search,
     ))
 
-    loop = AgentLoop(LiteratureBackend(), registry, "system", workdir=tmp_path, auto_approve=True)
+    system = "# 运行时日期\n当前本地日期为 2026-07-14，时区为 Asia/Shanghai."
+    loop = AgentLoop(LiteratureBackend(), registry, system, workdir=tmp_path, auto_approve=True)
     answer = loop.run("帮我找最近一周多模态压缩论文")
 
     assert "https://arxiv.org/abs/2607.12345" in answer
     assert calls["web"] == 0
     assert len(calls["arxiv"]) == 1
-    assert calls["arxiv"][0]["end_date"] == date.today().isoformat()
+    assert calls["arxiv"][0]["start_date"] == "2026-07-07"
+    assert calls["arxiv"][0]["end_date"] == "2026-07-14"
     assert calls["arxiv"][0]["max_results"] == 5
     assert any("自动从 web_search 路由到 arxiv_search" in str(message.get("content", "")) for message in seen_messages[-1])
+
+
+def test_recent_literature_arxiv_dates_are_corrected_from_runtime_context(tmp_path: Path):
+    seen_messages = []
+    calls = []
+
+    class StaleDateBackend:
+        def __init__(self):
+            self.turn = 0
+
+        def chat(self, messages, tools=None):
+            seen_messages.append([dict(message) for message in messages])
+            self.turn += 1
+            if self.turn == 1:
+                return {"content": "", "tool_calls": [{
+                    "id": "arxiv-1",
+                    "name": "arxiv_search",
+                    "arguments": {
+                        "query": "multimodal compression",
+                        "start_date": "2025-04-01",
+                        "end_date": "2025-04-08",
+                    },
+                }]}
+            return {
+                "content": (
+                    "最近一周论文检索报告\n"
+                    "严格匹配 1 篇。提交日期：2026-07-13。\n"
+                    "摘要：多模态压缩。解决问题：推理成本。核心方法：token 压缩。\n"
+                    "来源：https://arxiv.org/abs/2607.12345"
+                ),
+                "tool_calls": [],
+            }
+
+    def fake_arxiv_search(**kwargs):
+        calls.append(kwargs)
+        return "arXiv result from corrected dates"
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "arxiv_search", "", {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "start_date": {"type": "string"},
+                "end_date": {"type": "string"},
+            },
+            "required": ["query"],
+        },
+        fake_arxiv_search,
+    ))
+
+    system = "# 运行时日期\n当前本地日期为 2026-07-14，时区为 Asia/Shanghai."
+    loop = AgentLoop(StaleDateBackend(), registry, system, workdir=tmp_path, auto_approve=True)
+
+    answer = loop.run("找最近一周多模态模型压缩的新论文")
+
+    assert "https://arxiv.org/abs/2607.12345" in answer
+    assert calls == [{
+        "query": "multimodal compression",
+        "start_date": "2026-07-07",
+        "end_date": "2026-07-14",
+    }]
+    assert any("自动校正 arxiv_search 日期区间" in str(message.get("content", "")) for message in seen_messages[-1])
 
 
 def test_direct_url_web_search_is_routed_to_fetch(tmp_path: Path):
