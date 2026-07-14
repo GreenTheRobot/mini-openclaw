@@ -142,7 +142,7 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 - [X] 完成评测基础模块：包含任务集、轨迹记录、工具调用指标、消融样例和 LLM-as-judge 雏形。
 - [X] 完成多模态与文献解析依赖维护：`requirements.txt` 增加 `pillow`、`rich`、`markitdown[all]`、`marker-pdf`。
 - [X] 完成 PDF 解析运行链路：优先评估 GPU 使用 Marker，GPU 不满足时降级 MarkItDown，并用 PyMuPDF 保存论文图片和 `image_manifest.json`。
-- [X] 完成相对路径定时科研任务：`schedule_task` 管理任务，独立运行保存 TODO、stdout、stderr 和 Trace；可由 `python -m agent.scheduler run-due` 配合系统定时器触发。
+- [X] 完成持久化定时科研任务：`schedule_task` 管理任务，创建时自动配置项目专属用户级 cron 唤醒器；终端关闭后仍会按分钟检查到期任务，并独立保存 TODO、stdout、stderr 和 Trace。
 - [X] 完成结构化 Trace：以带父子关联的 LLM/工具 span 记录运行，支持终端/Markdown/HTML 渲染、只读 replay 与 simulate、成本/慢调用统计和诊断建议。
 
 ## 已实现功能清单
@@ -171,7 +171,7 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 - `glob`：在工作目录内的相对 `path` 下按通配模式递归查找文件；默认从 `.` 查找，并拒绝绝对路径或 `..` 越界。
 - `pdf_metadata` / `pdf_extract_text`：读取 PDF 元数据和正文，按 GPU 条件选择 Marker/MarkItDown，并保存相对路径图片素材。
 - `paper_figure_analyze`：调用视觉后端分析 PDF 生成的 figure/table 图片，遵循 `paper-figure-reader` Skill。
-- `schedule_task`：创建、查看、暂停、恢复、删除或立即执行相对路径科研任务。
+- `schedule_task`：创建、查看、暂停、恢复、删除或立即执行相对路径科研任务；创建时默认安装用户级 cron 唤醒器，可通过 `wakeup_status` 查看其安装与运行状态。
 - `web_fetch`：抓取白名单域名 URL，转成 markdown，控制返回长度，并用 `external` wrapper 标记为非用户指令。
 - `wechat_file_transfer`：向固定允许列表内的微信会话发送文本，默认目标为文件传输助手；额外目标需由运行环境预先配置 `WX_ALLOWED_TARGETS`，用户/模型不能临时扩展联系人。设置 `WECHAT_DRY_RUN=1` 时只在终端打印目标和内容，不连接桥接服务、不发送真实消息；连接不上桥接服务时会默认尝试启动 `services\wechat_bridge\start.ps1`，可用 `WECHAT_BRIDGE_START_CMD` 覆盖启动命令。
 
@@ -200,7 +200,7 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 - 论文图表分析：区分可见事实、合理推断和无法可靠读取的信息。
 - Literature review 工作流：支持从研究问题界定到文献矩阵、主题综合、复现建议和最终 markdown 报告。
 - PDF 解析工具：`pdf_extract_text` 按 GPU 条件选择 Marker/MarkItDown，解析图片交给 `paper_figure_analyze`，规则由 `paper-figure-reader` Skill 维护。
-- 定时科研任务：调度配置和运行产物只保存项目内相对路径；每次运行使用独立 TODO 状态，存在未完成 TODO 时运行状态不会标记为 completed。
+- 定时科研任务：调度配置和运行产物只保存项目内相对路径；创建任务默认配置项目专属用户级 cron，每分钟检查到期任务，因此关闭终端后仍可执行；每次运行使用独立 TODO 状态，存在未完成 TODO 时运行状态不会标记为 completed。
 - 报错截图调试：强调先截图转写，再用 `grep`/`glob`/`read` 本地验证，最后 `edit`/`bash` 修复验证。
 
 ### 评测与可观测能力
@@ -254,6 +254,24 @@ export OPENCLAW_OUTPUT_USD_PER_MILLION=1.10
 ```
 
 多轮任务的 `summary.prefix_cache.adjacent_match_ratio` 应为 `1.0`，表示连续 LLM 调用的稳定 system 前缀未被中途改写；只有一轮 LLM 调用时该字段为 `null` 属于正常情况。定时科研任务则对其运行目录中的 `trace.jsonl` 使用同一组六种命令验证，根 span 会包含 `schedule_id` 和 `scheduled_run_id`。
+
+### 持久化定时唤醒
+
+在 Linux/WSL 中，智能体通过 `schedule_task(action="add", ...)` 创建任务时，会在当前用户的 crontab 中写入带项目专属标记的单例规则。该规则每分钟在项目根目录执行 `python -m agent.scheduler run-due`，所以 CLI 退出或终端关闭不会影响已保存的任务。绝对路径仅存在于系统 crontab 命令中（cron 运行所必需），`.mini-openclaw/schedules.json`、任务产物和 Trace 仍只使用项目内相对路径。
+
+```bash
+# 创建任务后确认：installed 和 active 均应为 true
+python -m agent.scheduler wakeup-status
+
+# 查看本项目已保存的任务及其下一次运行时间
+python -m agent.scheduler list
+
+# cron 在最小环境中运行；真实模型密钥请放在项目根目录 .env（已忽略，不提交）
+# 例如：DEEPSEEK_API_KEY=...
+
+# 仅在需要停用自动唤醒时执行；只会删除本项目的 cron 块
+python -m agent.scheduler disable-wakeup
+```
 
 ## 里程碑
 

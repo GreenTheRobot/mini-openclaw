@@ -159,7 +159,7 @@ def check(tool: str, args: dict[str, Any], workdir: Path, *, mode: str = "defaul
         return PermissionDecision("allow", "任务规划仅写入工作目录内部状态")
     if tool in SCHEDULING:
         action = str(args.get("action", ""))
-        if action == "list":
+        if action in {"list", "wakeup_status"}:
             return PermissionDecision("allow", "读取工作目录内的调度配置")
         return PermissionDecision("confirm", "将创建或改变自动科研任务调度配置")
     if tool in EXTERNAL_SEND and "dry_run" in args and bool(args.get("dry_run")):

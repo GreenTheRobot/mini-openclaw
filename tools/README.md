@@ -8,7 +8,7 @@
 
 ## 定时科研任务
 
-`schedule_task` 将任务保存到 `.mini-openclaw/schedules.json`，只接受项目内相对 `workdir`。每次运行独立启动 Agent CLI，并在 `.mini-openclaw/scheduler-runs/` 保存 stdout、stderr、Trace 和独立 TODO 状态；设置 `max_runs` 后达到指定轮数会自动禁用；后台可通过 `python -m agent.scheduler run-due` 配合 cron/systemd timer 周期触发。
+`schedule_task` 将任务保存到 `.mini-openclaw/schedules.json`，只接受项目内相对 `workdir`。创建任务时默认安装一个带项目专属标记的用户级 cron 规则，每分钟执行一次 `python -m agent.scheduler run-due`；因此终端关闭后仍可唤醒到期任务。每次运行独立启动 Agent CLI，并在 `.mini-openclaw/scheduler-runs/` 保存 stdout、stderr、Trace 和独立 TODO 状态；设置 `max_runs` 后达到指定轮数会自动禁用。可用 `schedule_task(action="wakeup_status")` 或 `python -m agent.scheduler wakeup-status` 检查，`disable_wakeup` 可安全删除仅属于本项目的 cron 块。cron 会加载项目根目录的 `.env`，以获取未提交的模型 API 配置。
 
 ## wechat
 
