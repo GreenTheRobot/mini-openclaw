@@ -3,6 +3,7 @@ from pathlib import Path
 from agent.loop import AgentLoop
 from eval.tracer import Tracer, summarize
 from tools.base import Tool, ToolRegistry, ToolResult
+from tools.fs import write_tool
 from tools.todo import todo_write_tool, update_todo_tool
 
 
@@ -68,6 +69,27 @@ def test_loop_treats_semantic_tool_failure_as_recoverable_observation(tmp_path: 
     assert loop.run("执行任务") == "检测到失败后已改用替代方案。"
     assert summarize(trace)["errors"] == 1
     assert any("[TOOL_ERROR]" in message.get("content", "") for message in seen_messages[-1])
+
+
+def test_loop_corrects_unverified_save_claim_after_write_denied(tmp_path: Path):
+    registry = ToolRegistry()
+    registry.register(write_tool)
+    backend = SequenceBackend([
+        {"content": "", "tool_calls": [{
+            "id": "write-notes",
+            "name": "write",
+            "arguments": {"path": "structured_notes.md", "content": "# notes\n"},
+        }]},
+        {"content": "结构化笔记已保存到 structured_notes.md。", "tool_calls": []},
+    ])
+
+    loop = AgentLoop(backend, registry, "system", workdir=tmp_path)
+    answer = loop.run("读 PDF 出结构化笔记")
+
+    assert "结构化笔记已保存到 structured_notes.md" in answer
+    assert "没有实际保存这些文件" in answer
+    assert "`write` `structured_notes.md`：confirmation_required" in answer
+    assert not (tmp_path / "structured_notes.md").exists()
 
 
 def test_session_domain_grant_avoids_repeated_confirmation(tmp_path: Path):

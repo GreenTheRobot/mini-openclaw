@@ -21,6 +21,11 @@ def _wrap_pdf(text: str, source: str) -> str:
     )
 
 
+def _display_path(path: Path) -> str:
+    """Use stable POSIX-style relative paths in tool observations."""
+    return path.as_posix()
+
+
 def _extract_with_pypdf(path: Path, max_pages: int) -> tuple[str, dict[str, Any]]:
     try:
         from pypdf import PdfReader
@@ -255,7 +260,12 @@ def _pdf_extract_text(
             manifest.extend(_extract_pymupdf_images(target, image_dir, max_pages))
     manifest_path = output / "image_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    metadata.update({"parser": selected, "gpu": gpu, "image_manifest": str(manifest_path), "images": len(manifest)})
+    metadata.update({
+        "parser": selected,
+        "gpu": gpu,
+        "image_manifest": _display_path(manifest_path),
+        "images": len(manifest),
+    })
     if fallback:
         metadata["fallback"] = fallback
     header = "# PDF metadata\n" + "\n".join(f"- {key}: {value}" for key, value in metadata.items())
@@ -263,7 +273,7 @@ def _pdf_extract_text(
     markdown_path = output / "paper.md"
     markdown_path.write_text(markdown, encoding="utf-8")
     return _wrap_pdf(
-        markdown + f"\n\n解析产物：{markdown_path}\n图片清单：{manifest_path}",
+        markdown + f"\n\n解析产物：{_display_path(markdown_path)}\n图片清单：{_display_path(manifest_path)}",
         str(target),
     )
 

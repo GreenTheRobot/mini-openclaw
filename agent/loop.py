@@ -35,6 +35,15 @@ REUSABLE_OBSERVATION_TOOLS = {"arxiv_search", "web_fetch", "web_search", "read",
 RESEARCH_DISCOVERY_TOOLS = {"arxiv_search", "web_fetch", "web_search"}
 NETWORK_PROBE_HINTS = ("curl", "wget", "requests", "httpx", "urllib", "http://", "https://")
 TODO_TOOL_NAMES = {"task_list", "todo_write", "update_todo"}
+FILE_MUTATION_TOOLS = {"write", "edit"}
+FILE_MUTATION_SUCCESS_HINTS = (
+    "已保存", "已写入", "已修改", "已更新", "已生成", "已创建",
+    "保存到", "写入到", "内容保存在", "saved", "written", "modified",
+)
+FILE_MUTATION_FAILURE_HINTS = (
+    "未保存", "没有保存", "未写入", "写入失败", "保存失败", "未修改",
+    "需要确认", "尚未获批", "not saved", "failed to save",
+)
 
 
 def _needs_research_report(user_task: str) -> bool:
@@ -85,6 +94,55 @@ def _research_answer_repair_prompt(user_task: str, answer: str) -> str:
         "创新点、局限性或适用场景；以及每项结论的信息依据。没有找到的内容必须明确说明。"
         + _literature_delivery_requirements(user_task)
     )
+
+
+def _mentions_successful_file_mutation(answer: str) -> bool:
+    lowered = answer.lower()
+    return (
+        any(hint.lower() in lowered for hint in FILE_MUTATION_SUCCESS_HINTS)
+        and not any(hint.lower() in lowered for hint in FILE_MUTATION_FAILURE_HINTS)
+    )
+
+
+def _format_failed_file_mutation(failure: dict[str, Any]) -> str:
+    path = failure.get("path") or "<unknown path>"
+    tool = failure.get("tool") or "write/edit"
+    category = failure.get("category") or "unknown"
+    message = failure.get("message") or "未执行"
+    return f"- `{tool}` `{path}`：{category}，{message}"
+
+
+def _parse_tool_error_fields(text: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for line in str(text).splitlines():
+        if ": " not in line:
+            continue
+        key, value = line.split(": ", 1)
+        if key in {"tool", "category", "message", "suggestion"}:
+            fields[key] = value
+    return fields
+
+
+def _correct_unverified_file_mutation_claims(answer: str, failures: list[dict[str, Any]]) -> str:
+    """Append a deterministic correction when a failed write/edit was overstated."""
+    if not answer.strip() or not failures or not _mentions_successful_file_mutation(answer):
+        return answer
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for failure in failures:
+        key = (str(failure.get("tool", "")), str(failure.get("path", "")))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(failure)
+    details = "\n".join(_format_failed_file_mutation(item) for item in unique[:5])
+    more = "" if len(unique) <= 5 else f"\n- 另有 {len(unique) - 5} 个写入/修改失败。"
+    correction = (
+        "\n\n> 注意：本次运行中有文件写入/修改未获确认或执行失败，"
+        "因此没有实际保存这些文件；上文若提到“已保存/已写入/已修改”，以本说明为准。\n"
+        f"{details}{more}"
+    )
+    return answer.rstrip() + correction
 
 class AgentLoop:
     _FAILURE_SUGGESTIONS = {
@@ -308,6 +366,7 @@ class AgentLoop:
         consecutive_errors = 0
         successful_tools = 0
         error_categories: list[str] = []
+        failed_file_mutations: list[dict[str, Any]] = []
         research_answer_repairs = 0
         research_tool_calls = 0
         last_compaction_turn = -3
@@ -381,7 +440,8 @@ class AgentLoop:
                             "final_blocked", reason="insufficient_research_answer", turn=turn + 1,
                         )
                     continue
-                self._emit("answer", content=assistant.get("content", ""), turn=turn + 1)
+                answer = _correct_unverified_file_mutation_claims(answer, failed_file_mutations)
+                self._emit("answer", content=answer, turn=turn + 1)
                 self.last_run_status = "success" if answer else "failed"
                 if self.tracer:
                     self.tracer.log_event("run_end", status=self.last_run_status, turns=turn + 1)
@@ -462,6 +522,14 @@ class AgentLoop:
                 else:
                     consecutive_errors += 1
                     error_categories.append(error_category)
+                    if call_name in FILE_MUTATION_TOOLS and isinstance(arguments, dict):
+                        parsed_error = _parse_tool_error_fields(str(obs))
+                        failed_file_mutations.append({
+                            "tool": call_name,
+                            "path": arguments.get("path", ""),
+                            "category": parsed_error.get("category", error_category),
+                            "message": parsed_error.get("message", str(obs)),
+                        })
                 messages.append({
                     "role": "tool",
                     "name": call_name,
