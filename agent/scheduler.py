@@ -158,6 +158,8 @@ def _cron_block(root: Path) -> str:
     log = shlex.quote(str((root / WAKEUP_LOG_PATH).resolve()))
     command = _cron_escape(
         f"cd {project} && "
+        "if [ -f \"$HOME/.profile\" ]; then set -a; . \"$HOME/.profile\"; set +a; fi; "
+        "if [ -f \"$HOME/.bashrc\" ]; then set -a; . \"$HOME/.bashrc\"; set +a; fi; "
         "if [ -f .env ]; then set -a; . ./.env; set +a; fi; "
         f"\"${{MINI_OPENCLAW_PYTHON:-{python}}}\" -m agent.scheduler run-due >> {log} 2>&1"
     )

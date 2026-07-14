@@ -19,3 +19,4 @@ demo_project/model.txt
 .pytest_cache/
 mini_openclaw.egg-info/
 demo/attention-is-all-you-need-pytorch/
+.claude/
