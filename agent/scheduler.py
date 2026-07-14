@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -17,6 +20,7 @@ from zoneinfo import ZoneInfo
 SCHEDULE_PATH = Path(".mini-openclaw/schedules.json")
 RUN_ROOT = Path(".mini-openclaw/scheduler-runs")
 LOCK_PATH = Path(".mini-openclaw/scheduler.lock")
+WAKEUP_LOG_PATH = Path(".mini-openclaw/scheduler-wakeup.log")
 
 
 def _now(timezone: str) -> datetime:
@@ -85,6 +89,119 @@ def _save(root: Path, schedules: list[dict[str, Any]]) -> None:
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(schedules, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
+
+
+def _cron_markers(root: Path) -> tuple[str, str]:
+    """Use a root-specific block so separate project worktrees do not collide."""
+    identity = hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:12]
+    return (
+        f"# mini-openclaw scheduler {identity} BEGIN",
+        f"# mini-openclaw scheduler {identity} END",
+    )
+
+
+def _cron_escape(value: str) -> str:
+    # cron treats an unescaped percent as a newline sent to stdin, even in quotes.
+    return value.replace("%", r"\%")
+
+
+def _cron_block(root: Path) -> str:
+    begin, end = _cron_markers(root)
+    python = shlex.quote(str(Path(sys.executable).resolve()))
+    project = shlex.quote(str(root.resolve()))
+    log = shlex.quote(str((root / WAKEUP_LOG_PATH).resolve()))
+    command = _cron_escape(
+        f"cd {project} && "
+        "if [ -f .env ]; then set -a; . ./.env; set +a; fi; "
+        f"{python} -m agent.scheduler run-due >> {log} 2>&1"
+    )
+    return f"{begin}\n* * * * * {command}\n{end}\n"
+
+
+def _remove_cron_block(content: str, root: Path) -> str:
+    begin, end = _cron_markers(root)
+    kept: list[str] = []
+    inside = False
+    for line in content.splitlines():
+        if line == begin:
+            inside = True
+            continue
+        if line == end and inside:
+            inside = False
+            continue
+        if not inside:
+            kept.append(line)
+    return "\n".join(kept).strip()
+
+
+def _read_crontab(runner: Any = subprocess.run, which: Any = shutil.which) -> str:
+    if os.name != "posix" or not which("crontab"):
+        raise RuntimeError("当前平台未提供用户级 crontab；请改用 systemd timer 或手动运行 run-due")
+    result = runner(["crontab", "-l"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if result.returncode == 0:
+        return result.stdout
+    # `crontab -l` returns 1 for a user who has not configured one yet.
+    if result.returncode == 1 and "no crontab" in (result.stderr or "").lower():
+        return ""
+    raise RuntimeError(f"读取用户 crontab 失败：{(result.stderr or result.stdout).strip()}")
+
+
+def _cron_daemon_running(runner: Any = subprocess.run) -> bool:
+    result = runner(["pgrep", "-x", "cron"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if result.returncode == 0:
+        return True
+    result = runner(["pgrep", "-x", "crond"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return result.returncode == 0
+
+
+def wakeup_status(*, root: Path | str = ".", runner: Any = subprocess.run, which: Any = shutil.which) -> dict[str, Any]:
+    """Report whether this project's persistent cron wake-up block is installed."""
+    root = Path(root).resolve()
+    try:
+        content = _read_crontab(runner, which)
+    except RuntimeError as exc:
+        return {"backend": "cron", "installed": False, "active": False, "error": str(exc)}
+    begin, end = _cron_markers(root)
+    installed = begin in content and end in content
+    return {
+        "backend": "cron",
+        "installed": installed,
+        "active": installed and _cron_daemon_running(runner),
+        "interval_minutes": 1,
+        "log": WAKEUP_LOG_PATH.as_posix(),
+    }
+
+
+def install_wakeup(*, root: Path | str = ".", runner: Any = subprocess.run, which: Any = shutil.which) -> dict[str, Any]:
+    """Install/update one user-cron entry that wakes this project every minute."""
+    root = Path(root).resolve()
+    content = _read_crontab(runner, which)
+    cleaned = _remove_cron_block(content, root)
+    merged = (cleaned + "\n" if cleaned else "") + _cron_block(root)
+    result = runner(
+        ["crontab", "-"], input=merged, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"写入用户 crontab 失败：{(result.stderr or result.stdout).strip()}")
+    status = wakeup_status(root=root, runner=runner, which=which)
+    if not status["installed"]:
+        raise RuntimeError("用户 crontab 写入后未找到 mini-openclaw 唤醒规则")
+    return status
+
+
+def uninstall_wakeup(*, root: Path | str = ".", runner: Any = subprocess.run, which: Any = shutil.which) -> dict[str, Any]:
+    """Remove only this project's marked cron block, leaving other jobs untouched."""
+    root = Path(root).resolve()
+    content = _read_crontab(runner, which)
+    cleaned = _remove_cron_block(content, root)
+    result = runner(
+        ["crontab", "-"], input=(cleaned + "\n") if cleaned else "", capture_output=True,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"更新用户 crontab 失败：{(result.stderr or result.stdout).strip()}")
+    return wakeup_status(root=root, runner=runner, which=which)
 
 
 def add_schedule(
@@ -265,7 +382,10 @@ def _execute(spec: dict[str, Any], root: Path) -> dict[str, Any]:
         output_path.write_text(str(exc.stdout or ""), encoding="utf-8")
         error_path.write_text(str(exc.stderr or ""), encoding="utf-8")
     todo = _todo_status(run_dir / f"{run_id}.tasks.json", workdir)
-    if status == "completed" and todo["open"]:
+    # Scheduled jobs are required to leave a run-local TODO trail.  Without it
+    # (for example when the CLI falls back to FakeBackend), a zero exit code is
+    # not execution evidence and must not be reported as completed.
+    if status == "completed" and (not todo["present"] or todo["open"]):
         status = "incomplete"
     finished = datetime.now().astimezone()
     return {
@@ -344,13 +464,22 @@ def _main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run")
     run.add_argument("schedule_id")
     sub.add_parser("run-due")
+    sub.add_parser("wakeup-status")
+    sub.add_parser("enable-wakeup")
+    sub.add_parser("disable-wakeup")
     args = parser.parse_args(argv)
     if args.command == "list":
         print(json.dumps(list_schedules(), ensure_ascii=False, indent=2))
     elif args.command == "run":
         print(json.dumps(run_schedule(args.schedule_id), ensure_ascii=False, indent=2))
-    else:
+    elif args.command == "run-due":
         print(json.dumps(run_due(), ensure_ascii=False, indent=2))
+    elif args.command == "wakeup-status":
+        print(json.dumps(wakeup_status(), ensure_ascii=False, indent=2))
+    elif args.command == "enable-wakeup":
+        print(json.dumps(install_wakeup(), ensure_ascii=False, indent=2))
+    else:
+        print(json.dumps(uninstall_wakeup(), ensure_ascii=False, indent=2))
     return 0
 
 
