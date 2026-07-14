@@ -14,7 +14,9 @@ python -m eval.trace_cli simulate traces/demo.jsonl
 python -m eval.trace_cli diagnose traces/demo.jsonl
 ```
 
-若要显示估算费用，在运行报告命令前配置所用模型的价格（美元/百万 token）：
+Trace 已内置当前模型的价格：`deepseek-v4-flash` 使用美元（缓存未命中 `$0.14`、缓存命中 `$0.0028`、输出 `$0.28` / 百万 token）；配置的 Qwen 视觉模型使用人民币价格（输入 `¥2`、显式缓存创建 `¥2.5`、显式缓存命中 `¥0.2`、输出 `¥12` / 百万 token，输入不超过 256K token 的阶梯）。混合模型任务会分别汇总 USD 与 CNY，不会做未经配置的汇率换算。
+
+若使用其他模型，或需临时覆盖为自定义美元价格，可在运行报告前设置：
 
 ```bash
 export OPENCLAW_INPUT_USD_PER_MILLION=0.27

@@ -10,6 +10,30 @@ from typing import Any
 from agent.tracer import redact_for_trace
 
 
+# Built-in rates supplied for the models currently used by this project.
+# Amounts are per one million tokens.  Qwen's supplied tier applies only when
+# the request input is no more than 256K tokens, so larger requests are left
+# unpriced instead of applying an incorrect tier.
+_MODEL_PRICING: dict[str, dict[str, Any]] = {
+    "deepseek-v4-flash": {
+        "currency": "USD",
+        "input_per_million": 0.14,
+        "cache_hit_per_million": 0.0028,
+        "output_per_million": 0.28,
+        "source": "built_in",
+    },
+    "qwen-vision": {
+        "currency": "CNY",
+        "input_per_million": 2.0,
+        "cache_creation_per_million": 2.5,
+        "cache_hit_per_million": 0.2,
+        "output_per_million": 12.0,
+        "max_input_tokens": 256_000,
+        "source": "built_in",
+    },
+}
+
+
 def _display_safe(value: Any) -> Any:
     """Older traces predate write-time redaction; never expose them in a view."""
     return redact_for_trace(value, Path.cwd())
@@ -97,19 +121,38 @@ def _legacy_spans(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return spans
 
 
-def _price_config() -> tuple[float | None, float | None, str]:
+def _environment_price_config() -> dict[str, Any] | None:
+    """Retain the original explicit USD override for custom/provider models."""
     raw_input = os.environ.get("OPENCLAW_INPUT_USD_PER_MILLION", "").strip()
     raw_output = os.environ.get("OPENCLAW_OUTPUT_USD_PER_MILLION", "").strip()
     if not raw_input and not raw_output:
-        return None, None, "unpriced"
+        return None
     try:
         input_price = float(raw_input or "0")
         output_price = float(raw_output or "0")
     except ValueError as exc:
         raise ValueError("OPENCLAW_*_USD_PER_MILLION 必须是数字") from exc
     if input_price == 0 and output_price == 0:
-        return None, None, "unpriced"
-    return input_price, output_price, "estimated"
+        return None
+    return {
+        "currency": "USD",
+        "input_per_million": input_price,
+        "output_per_million": output_price,
+        "source": "environment",
+    }
+
+
+def _price_config(model: Any) -> dict[str, Any] | None:
+    """Return a model-specific price card; env values intentionally override it."""
+    override = _environment_price_config()
+    if override:
+        return override
+    normalized = str(model or "").strip().lower().replace("_", "-")
+    if "deepseek-v4-flash" in normalized:
+        return {**_MODEL_PRICING["deepseek-v4-flash"], "model": str(model)}
+    if normalized.startswith("qwen") or "qwen-" in normalized:
+        return {**_MODEL_PRICING["qwen-vision"], "model": str(model)}
+    return None
 
 
 def _usage_metrics(usage: dict[str, Any]) -> dict[str, int]:
@@ -127,28 +170,65 @@ def _usage_metrics(usage: dict[str, Any]) -> dict[str, int]:
     completion = number("completion_tokens", "output_tokens")
     total = number("total_tokens") or prompt + completion
     cached = number("cached_tokens", "prompt_cache_hit_tokens", "cache_read_input_tokens")
-    return {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total, "cached_tokens": cached}
+    cache_creation = number("cache_creation_tokens", "cache_creation_input_tokens", "cache_write_input_tokens")
+    cached = min(prompt, max(0, cached))
+    cache_creation = min(max(0, prompt - cached), max(0, cache_creation))
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+        "cached_tokens": cached,
+        "cache_creation_tokens": cache_creation,
+        "uncached_prompt_tokens": max(0, prompt - cached - cache_creation),
+    }
 
+
+def _span_cost(usage: dict[str, int], pricing: dict[str, Any] | None) -> tuple[float | None, str, str]:
+    """Calculate one span without converting or mixing currencies."""
+    if not pricing:
+        return None, "", "unpriced"
+    maximum = pricing.get("max_input_tokens")
+    if maximum is not None and usage["prompt_tokens"] > int(maximum):
+        return None, str(pricing["currency"]), "input_tier_exceeded"
+    input_rate = float(pricing.get("input_per_million", 0))
+    cache_hit_rate = float(pricing.get("cache_hit_per_million", input_rate))
+    cache_creation_rate = float(pricing.get("cache_creation_per_million", input_rate))
+    output_rate = float(pricing.get("output_per_million", 0))
+    cost = (
+        usage["uncached_prompt_tokens"] * input_rate
+        + usage["cached_tokens"] * cache_hit_rate
+        + usage["cache_creation_tokens"] * cache_creation_rate
+        + usage["completion_tokens"] * output_rate
+    ) / 1_000_000
+    return round(cost, 10), str(pricing["currency"]), "estimated"
 
 def enrich_spans(spans: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    input_price, output_price, pricing_status = _price_config()
     enriched: list[dict[str, Any]] = []
+    model_cards: dict[str, dict[str, Any]] = {}
+    statuses: set[str] = set()
     for span in spans:
         item = dict(span)
         usage = _usage_metrics(dict(item.get("usage") or {})) if item.get("kind") == "llm" else {}
         item["usage"] = {**dict(item.get("usage") or {}), **usage}
-        if item.get("kind") == "llm" and pricing_status == "estimated":
-            item["estimated_cost_usd"] = round(
-                (usage["prompt_tokens"] * float(input_price) + usage["completion_tokens"] * float(output_price)) / 1_000_000,
-                10,
-            )
-        else:
-            item["estimated_cost_usd"] = None
+        model = (item.get("attributes") or {}).get("model", "")
+        pricing = _price_config(model) if item.get("kind") == "llm" else None
+        cost, currency, status = _span_cost(usage, pricing) if item.get("kind") == "llm" else (None, "", "not_applicable")
+        if item.get("kind") == "llm":
+            card_key = str(model or "unknown")
+            if pricing:
+                model_cards[card_key] = {**pricing, "status": status}
+            else:
+                model_cards.setdefault(card_key, {"model": card_key, "status": "unpriced"})
+            statuses.add(status)
+        item["estimated_cost"] = cost
+        item["cost_currency"] = currency or None
+        item["pricing_status"] = status
+        item["estimated_cost_usd"] = cost if currency == "USD" else None
+        item["estimated_cost_cny"] = cost if currency == "CNY" else None
         enriched.append(item)
     return enriched, {
-        "status": pricing_status,
-        "input_usd_per_million": input_price,
-        "output_usd_per_million": output_price,
+        "status": "estimated" if "estimated" in statuses else "unpriced",
+        "models": model_cards,
     }
 
 
@@ -172,11 +252,21 @@ def summarize(path: str | Path, include_children: bool = False) -> dict[str, Any
     prompt_tokens = sum(int((span.get("usage") or {}).get("prompt_tokens", 0) or 0) for span in llm)
     completion_tokens = sum(int((span.get("usage") or {}).get("completion_tokens", 0) or 0) for span in llm)
     cached_tokens = sum(int((span.get("usage") or {}).get("cached_tokens", 0) or 0) for span in llm)
-    costs = [float(span["estimated_cost_usd"]) for span in llm if span.get("estimated_cost_usd") is not None]
+    cost_totals: dict[str, float] = {}
+    for span in llm:
+        cost = span.get("estimated_cost")
+        currency = span.get("cost_currency")
+        if cost is not None and currency:
+            cost_totals[str(currency)] = cost_totals.get(str(currency), 0.0) + float(cost)
     errors = sum(1 for span in spans if span.get("status") not in {"ok", "success", "completed"})
     visible_spans = [span for span in spans if not (span.get("kind") == "agent" and span.get("name") == "run")]
     slowest = max(visible_spans, key=lambda span: float(span.get("duration_ms", 0) or 0), default=None)
-    priciest = max((span for span in llm if span.get("estimated_cost_usd") is not None), key=lambda span: float(span["estimated_cost_usd"]), default=None)
+    currencies = set(cost_totals)
+    priciest = max(
+        (span for span in llm if span.get("estimated_cost") is not None),
+        key=lambda span: float(span["estimated_cost"]),
+        default=None,
+    ) if len(currencies) == 1 else None
     prefix_digests = [str((span.get("attributes") or {}).get("stable_prefix_digest", "")) for span in llm]
     known_prefixes = [digest for digest in prefix_digests if digest]
     adjacent_pairs = max(0, len(known_prefixes) - 1)
@@ -195,7 +285,9 @@ def summarize(path: str | Path, include_children: bool = False) -> dict[str, Any
         "total_tokens": prompt_tokens + completion_tokens,
         "cached_tokens": cached_tokens,
         "pricing": pricing,
-        "estimated_cost_usd": round(sum(costs), 10) if costs else None,
+        "estimated_cost_by_currency": {currency: round(cost, 10) for currency, cost in cost_totals.items()},
+        "estimated_cost_usd": round(cost_totals["USD"], 10) if "USD" in cost_totals else None,
+        "estimated_cost_cny": round(cost_totals["CNY"], 10) if "CNY" in cost_totals else None,
         "errors": errors,
         "duration_ms": _wall_duration_ms(records, spans),
         "llm_duration_ms": round(sum(float(span.get("duration_ms", 0) or 0) for span in llm), 2),
@@ -220,7 +312,9 @@ def _span_summary(span: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     return {
         "kind": span.get("kind"), "name": span.get("name"), "status": span.get("status"),
-        "duration_ms": span.get("duration_ms"), "estimated_cost_usd": span.get("estimated_cost_usd"),
+        "duration_ms": span.get("duration_ms"),
+        "estimated_cost": span.get("estimated_cost"), "cost_currency": span.get("cost_currency"),
+        "estimated_cost_usd": span.get("estimated_cost_usd"),
         "turn": (span.get("attributes") or {}).get("turn"),
     }
 
@@ -239,7 +333,11 @@ def cost_report(path: str | Path) -> dict[str, Any]:
                 "prompt_tokens": (span.get("usage") or {}).get("prompt_tokens", 0),
                 "completion_tokens": (span.get("usage") or {}).get("completion_tokens", 0),
                 "cached_tokens": (span.get("usage") or {}).get("cached_tokens", 0),
+                "cache_creation_tokens": (span.get("usage") or {}).get("cache_creation_tokens", 0),
+                "estimated_cost": span.get("estimated_cost"),
+                "cost_currency": span.get("cost_currency"),
                 "estimated_cost_usd": span.get("estimated_cost_usd"),
+                "estimated_cost_cny": span.get("estimated_cost_cny"),
             }
             for span in llm
         ],
@@ -368,8 +466,10 @@ def _usage_text(span: dict[str, Any]) -> str:
     completion = int(usage.get("completion_tokens", 0) or 0)
     if not prompt and not completion:
         return "-"
-    cost = span.get("estimated_cost_usd")
-    suffix = f" · ${float(cost):.6f}" if cost is not None else " · 未计价"
+    cost = span.get("estimated_cost")
+    currency = span.get("cost_currency")
+    symbol = {"USD": "$", "CNY": "¥"}.get(str(currency), f"{currency} ")
+    suffix = f" · {symbol}{float(cost):.6f}" if cost is not None else " · 未计价"
     return f"{prompt}+{completion} tok{suffix}"
 
 

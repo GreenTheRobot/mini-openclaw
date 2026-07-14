@@ -97,6 +97,53 @@ def test_cost_and_wall_time_include_tools_and_identify_expensive_span(tmp_path: 
     assert report["pricing"]["status"] == "estimated"
 
 
+def test_builtin_deepseek_and_qwen_prices_keep_currencies_separate(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("OPENCLAW_INPUT_USD_PER_MILLION", raising=False)
+    monkeypatch.delenv("OPENCLAW_OUTPUT_USD_PER_MILLION", raising=False)
+    trace_path = tmp_path / "priced.jsonl"
+    tracer = Tracer(trace_path)
+    tracer.start_run(task="price", workdir=tmp_path)
+    with tracer.span("llm", "decide", attributes={"model": "deepseek-v4-flash"}) as span:
+        span.finish(usage={
+            "prompt_tokens": 1_000_000,
+            "prompt_cache_hit_tokens": 250_000,
+            "completion_tokens": 1_000_000,
+        })
+    with tracer.span("llm", "vision", attributes={"model": "qwen-vl-plus"}) as span:
+        span.finish(usage={
+            "prompt_tokens": 100_000,
+            "cache_read_input_tokens": 10_000,
+            "cache_creation_input_tokens": 20_000,
+            "completion_tokens": 50_000,
+        })
+    tracer.finish_run(status="success")
+
+    summary = summarize(trace_path)
+    report = cost_report(trace_path)
+
+    # DeepSeek: 750K cache miss * $0.14 + 250K cache hit * $0.0028 + 1M output * $0.28.
+    assert summary["estimated_cost_usd"] == 0.3857
+    # Qwen: 70K input * ¥2 + 20K cache create * ¥2.5 + 10K cache hit * ¥0.2 + 50K output * ¥12.
+    assert summary["estimated_cost_cny"] == 0.792
+    assert summary["estimated_cost_by_currency"] == {"USD": 0.3857, "CNY": 0.792}
+    assert report["pricing"]["models"]["deepseek-v4-flash"]["cache_hit_per_million"] == 0.0028
+    assert report["pricing"]["models"]["qwen-vl-plus"]["cache_creation_per_million"] == 2.5
+
+
+def test_qwen_pricing_is_not_applied_beyond_supplied_256k_input_tier(tmp_path: Path):
+    trace_path = tmp_path / "qwen-tier.jsonl"
+    tracer = Tracer(trace_path)
+    tracer.start_run(task="price", workdir=tmp_path)
+    with tracer.span("llm", "vision", attributes={"model": "qwen-vl-plus"}) as span:
+        span.finish(usage={"prompt_tokens": 256_001, "completion_tokens": 1})
+    tracer.finish_run(status="success")
+
+    report = cost_report(trace_path)
+
+    assert report["spans"][0]["estimated_cost"] is None
+    assert report["pricing"]["models"]["qwen-vl-plus"]["status"] == "input_tier_exceeded"
+
+
 def test_mock_simulation_and_diagnostics_never_execute_tools(tmp_path: Path):
     trace_path = tmp_path / "diagnose.jsonl"
     events = [
