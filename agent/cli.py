@@ -452,6 +452,7 @@ def _interactive(
                     auto_approve=agent.auto_approve,
                     confirm_callback=agent.confirm_callback,
                     context_budget=context_budget,
+                    event_callback=renderer,
                 )
                 renderer.load_trace_steps(_related_trace_paths(trace_path), since_ts=turn_started_at)
             else:
@@ -620,6 +621,7 @@ def main(argv: list[str] | None = None) -> int:
             auto_approve=args.auto_approve,
             confirm_callback=_confirm_tool_call,
             context_budget=args.context_budget,
+            event_callback=renderer,
         )
         renderer.load_trace_steps(_related_trace_paths(trace_path), since_ts=turn_started_at)
     else:

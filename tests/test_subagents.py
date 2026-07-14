@@ -108,6 +108,53 @@ class DirectDecisionBackend(NoToolBackend):
         return {"content": "主 Agent 直接完成。", "tool_calls": []}
 
 
+class DirectResearchBackend(NoToolBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.answer_turn = 0
+
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        if "主 Agent" in system and "JSON" in system:
+            return {"content": '{"use_subagents": false, "reason": "主 Agent 足够", "main_task": "直接总结候选论文", "assignments": {"research": "", "engineering": "", "multimodal": ""}}', "tool_calls": []}
+        self.answer_turn += 1
+        if self.answer_turn == 1:
+            return {
+                "content": (
+                    "# 论文调研\n\n"
+                    "## 严格匹配论文\n"
+                    "### Efficient Multimodal Compression\n"
+                    "- 提交日期：2026-07-13\n"
+                    "- 摘要：研究视觉 token 压缩。\n"
+                    "- 解决问题：降低多模态模型推理成本。\n"
+                    "- 核心方法：筛选高信息量视觉 token。\n"
+                    "- 主要贡献/结论：减少 token 并保持能力。\n\n"
+                    "## 检索说明\n使用论文关键词检索。"
+                ),
+                "tool_calls": [],
+            }
+        return {
+            "content": (
+                "# 论文调研\n\n"
+                "## 检索范围\n"
+                "本轮围绕多模态模型压缩和视觉 token 压缩进行候选论文整理，严格匹配 1 篇。\n\n"
+                "## 严格匹配论文\n"
+                "### Efficient Multimodal Compression\n"
+                "- 提交日期：2026-07-13\n"
+                "- 研究方向：多模态模型压缩。\n"
+                "- 摘要：研究视觉 token 压缩。\n"
+                "- 解决问题：降低多模态模型推理成本。\n"
+                "- 核心方法：筛选高信息量视觉 token。\n"
+                "- 主要贡献/结论：减少 token 并保持能力。\n"
+                "- 来源：https://arxiv.org/abs/2607.12345\n\n"
+                "## 扩展相关工作\n"
+                "当前证据中没有其他可核验候选论文，因此不补旧论文凑数。\n\n"
+                "## 检索说明\n使用论文关键词检索。"
+            ),
+            "tool_calls": [],
+        }
+
+
 class AssignmentBackend(NoToolBackend):
     def __init__(self) -> None:
         super().__init__()
@@ -160,6 +207,53 @@ class EngineeringToolBackend(NoToolBackend):
         return {"content": "ok", "tool_calls": []}
 
 
+class LinkRepairBackend(NoToolBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.synthesis_calls = 0
+
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        if "主 Agent" in system and "JSON" in system:
+            return {"content": '{"use_subagents": true, "reason": "需要论文调研", "main_task": "", "assignments": {"research": "找论文并保留来源链接", "engineering": "", "multimodal": ""}}', "tool_calls": []}
+        if "Research Agent" in system:
+            return {
+                "content": (
+                    "找到论文：Efficient Multimodal Compression。\n"
+                    "来源：https://arxiv.org/abs/2607.12345\n"
+                    "核心方法：压缩视觉 token。"
+                ),
+                "tool_calls": [],
+            }
+        if "coordinator" in system:
+            self.synthesis_calls += 1
+            if self.synthesis_calls == 1:
+                return {"content": "综合结果：找到一篇多模态压缩论文，方法是压缩视觉 token。", "tool_calls": []}
+            return {
+                "content": (
+                    "# 论文调研结果\n\n"
+                    "## 论文\n"
+                    "Efficient Multimodal Compression 聚焦多模态模型中的视觉 token 开销问题。\n\n"
+                    "## 方法和思路\n"
+                    "该工作围绕视觉 token 压缩展开，通过保留更关键的视觉 token 来降低推理成本，"
+                    "同时尽量维持跨模态理解能力。这个结论来自 Research Agent 对论文条目的整理。\n\n"
+                    "## 核心贡献\n"
+                    "它把多模态压缩问题具体落到视觉 token 选择上，适合作为后续阅读和复现实验的候选论文。\n\n"
+                    "## 局限\n"
+                    "当前证据只包含论文条目摘要级信息，尚未验证实验表格和代码实现。\n\n"
+                    "## 依据说明\n"
+                    "上述论文标题、主题和方法概括均来自 Research Agent 输出；最终答案没有新增其他论文事实，"
+                    "也没有声称已经完成代码复现或实验验证。\n\n"
+                    "## 来源链接\n"
+                    "论文来源：https://arxiv.org/abs/2607.12345"
+                ),
+                "tool_calls": [],
+            }
+        if "Reviewer" in system or "Reviewer" in str(messages):
+            return {"content": "审查结论：通过。", "tool_calls": []}
+        return {"content": "ok", "tool_calls": []}
+
+
 def test_subagent_todo_paths_are_role_isolated():
     assert _agent_todo_path("parent/run", "research") != _agent_todo_path("parent/run", "engineering")
     assert ".mini-openclaw/subagents/parent-run/research/tasks.json" == _agent_todo_path("parent/run", "research")
@@ -204,6 +298,25 @@ def test_main_agent_can_skip_subagents_for_simple_task(tmp_path: Path):
     assert '"use_subagents": false' in log
 
 
+def test_direct_main_agent_keeps_original_research_delivery_requirements(tmp_path: Path):
+    backend = DirectResearchBackend()
+    trace = tmp_path / "trace.jsonl"
+
+    answer = run_multi_agent(
+        task="做一个多模态压缩论文调研",
+        backend=backend,
+        registry=ToolRegistry(),
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=trace,
+        parent_run_id="parent",
+    )
+
+    assert backend.answer_turn == 2
+    assert "https://arxiv.org/abs/2607.12345" in answer
+    assert "insufficient_research_answer" in (tmp_path / "subagents" / "trace.main.jsonl").read_text(encoding="utf-8")
+
+
 def test_main_agent_assigns_concrete_work_to_subagents(tmp_path: Path):
     backend = AssignmentBackend()
 
@@ -220,6 +333,37 @@ def test_main_agent_assigns_concrete_work_to_subagents(tmp_path: Path):
     assert answer == "综合结果。"
     assert "只阅读论文第 3 节并总结模型结构" in backend.research_message
     assert "只检查 tests/test_subagents.py 是否覆盖调度" in backend.engineering_message
+
+
+def test_multi_agent_emits_live_progress_events(tmp_path: Path):
+    backend = AssignmentBackend()
+    events = []
+
+    run_multi_agent(
+        task="分析论文并检查测试",
+        backend=backend,
+        registry=ToolRegistry(),
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=tmp_path / "trace.jsonl",
+        parent_run_id="parent",
+        event_callback=lambda event, payload: events.append((event, payload)),
+    )
+
+    event_names = [event for event, _payload in events]
+    assert "orchestration" in event_names
+    assert ("subagent_start", {
+        "role": "Research Agent",
+        "assignment": "只阅读论文第 3 节并总结模型结构",
+    }) in events
+    assert ("subagent_done", {"role": "Research Agent"}) in events
+    assert ("subagent_start", {
+        "role": "Engineering Agent",
+        "assignment": "只检查 tests/test_subagents.py 是否覆盖调度",
+    }) in events
+    assert "synthesis_start" in event_names
+    assert "review_start" in event_names
+    assert "review_done" in event_names
 
 
 def test_engineering_agent_receives_full_tool_registry(tmp_path: Path):
@@ -248,6 +392,26 @@ def test_engineering_agent_receives_full_tool_registry(tmp_path: Path):
     )
 
     assert backend.sent_tool_call is True
+
+
+def test_multi_agent_repairs_research_answer_when_synthesis_drops_links(tmp_path: Path):
+    backend = LinkRepairBackend()
+    trace = tmp_path / "trace.jsonl"
+
+    answer = run_multi_agent(
+        task="找一篇多模态压缩论文并总结",
+        backend=backend,
+        registry=ToolRegistry(),
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=trace,
+        parent_run_id="parent",
+    )
+
+    assert backend.synthesis_calls == 2
+    assert "https://arxiv.org/abs/2607.12345" in answer
+    log = trace.read_text(encoding="utf-8")
+    assert '"reason": "insufficient_research_answer"' in log
 
 
 def test_multi_agent_uses_vision_backend_only_for_images(tmp_path: Path):

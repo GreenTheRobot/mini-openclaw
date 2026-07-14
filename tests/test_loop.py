@@ -309,6 +309,57 @@ def test_loop_rejects_status_only_research_answer(tmp_path: Path):
     assert "insufficient_research_answer" in trace.read_text(encoding="utf-8")
 
 
+def test_loop_rejects_linkless_literature_research_answer(tmp_path: Path):
+    seen_messages = []
+
+    class LiteratureResearchBackend:
+        def __init__(self):
+            self.turn = 0
+
+        def chat(self, messages, tools=None):
+            seen_messages.append([dict(message) for message in messages])
+            self.turn += 1
+            if self.turn == 1:
+                return {
+                    "content": (
+                        "# 多模态压缩论文调研\n\n"
+                        "## 严格匹配论文\n"
+                        "### Efficient Multimodal Compression\n"
+                        "- 提交日期：2026-07-13\n"
+                        "- 摘要：研究视觉 token 压缩。\n"
+                        "- 解决问题：降低多模态模型推理成本。\n"
+                        "- 核心方法：筛选高信息量视觉 token。\n"
+                        "- 主要贡献/结论：在减少 token 的同时保持主要能力。\n\n"
+                        "## 检索说明\n使用论文关键词检索。"
+                    ),
+                    "tool_calls": [],
+                }
+            return {
+                "content": (
+                    "# 多模态压缩论文调研\n\n"
+                    "## 严格匹配论文\n"
+                    "### Efficient Multimodal Compression\n"
+                    "- 提交日期：2026-07-13\n"
+                    "- 研究方向：多模态模型压缩。\n"
+                    "- 摘要：研究视觉 token 压缩。\n"
+                    "- 解决问题：降低多模态模型推理成本。\n"
+                    "- 核心方法：筛选高信息量视觉 token。\n"
+                    "- 主要贡献/结论：在减少 token 的同时保持主要能力。\n"
+                    "- 来源：https://arxiv.org/abs/2607.12345\n\n"
+                    "## 检索说明\n使用论文关键词检索。"
+                ),
+                "tool_calls": [],
+            }
+
+    trace = tmp_path / "linkless-literature.jsonl"
+    loop = AgentLoop(LiteratureResearchBackend(), ToolRegistry(), "system", workdir=tmp_path, tracer=Tracer(trace))
+    answer = loop.run("做一个多模态压缩论文调研")
+
+    assert "https://arxiv.org/abs/2607.12345" in answer
+    assert any("不满足科研智能体" in str(message.get("content", "")) for message in seen_messages[1])
+    assert "insufficient_research_answer" in trace.read_text(encoding="utf-8")
+
+
 def test_loop_blocks_final_answer_while_todo_has_open_items(tmp_path: Path):
     seen_messages = []
 

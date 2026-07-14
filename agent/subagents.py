@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from agent.loop import AgentLoop
+from agent.loop import AgentLoop, _is_insufficient_research_answer, _research_answer_repair_prompt
 from agent.permissions import PermissionManager
 from agent.reviewer import review_answer, review_needs_revision
 from agent.sanitize import sanitize_for_json
@@ -46,6 +46,7 @@ MULTIMODAL_PROMPT = """你是 Multimodal Agent，负责理解用户附带的图�
 
 SYNTHESIS_PROMPT = """你是 multi-agent coordinator。你会收到 Planner、Research、Engineering 和 Multimodal 子 agent 的结果。
 请综合为最终答复：直接回答用户原始任务，最终正文必须以任务本身的专业内容为中心，依据、产物、未完成项和风险只作为支撑信息。
+对文献检索、论文阅读、网页/项目/GitHub 调研任务，最终答案必须保留可点击的论文、网页或仓库来源链接；如果子 agent 没有找到链接，要明确说明缺口和已尝试路径，不能静默省略。
 论文阅读/分析任务应优先讲清问题背景、核心方法、模型结构、实验结论、贡献、局限和你的综合理解；不要把正文写成工具证据清单或审查报告。
 不要编造子 agent 没有验证的信息。"""
 
@@ -230,6 +231,21 @@ def _trace_tool_evidence(trace_path: Path, role: str, max_chars: int = 3000) -> 
     return text[:max_chars]
 
 
+def _role_event_callback(
+    event_callback: Callable[[str, dict[str, Any]], None] | None,
+    role: str,
+) -> Callable[[str, dict[str, Any]], None] | None:
+    if event_callback is None:
+        return None
+
+    def callback(event: str, payload: dict[str, Any]) -> None:
+        tagged = dict(payload)
+        tagged.setdefault("role", role)
+        event_callback(event, tagged)
+
+    return callback
+
+
 def _run_role(
     *,
     role: str,
@@ -245,6 +261,7 @@ def _run_role(
     auto_approve: bool,
     confirm_callback: Callable[..., Any] | None,
     context_budget: int,
+    event_callback: Callable[[str, dict[str, Any]], None] | None = None,
     image_paths: list[str] | None = None,
 ) -> tuple[str, str]:
     role_trace_path = _agent_trace_path(trace_path, role)
@@ -259,6 +276,7 @@ def _run_role(
         auto_approve=auto_approve,
         confirm_callback=confirm_callback,
         tracer=tracer,
+        event_callback=_role_event_callback(event_callback, role),
         context_budget=context_budget,
         permission_manager=manager,
     )
@@ -285,6 +303,7 @@ def _run_main_agent(
     auto_approve: bool,
     confirm_callback: Callable[..., Any] | None,
     context_budget: int,
+    event_callback: Callable[[str, dict[str, Any]], None] | None = None,
     image_paths: list[str] | None = None,
 ) -> str:
     tracer = Tracer(_agent_trace_path(trace_path, "main"))
@@ -298,6 +317,7 @@ def _run_main_agent(
         auto_approve=auto_approve,
         confirm_callback=confirm_callback,
         tracer=tracer,
+        event_callback=_role_event_callback(event_callback, "Main Agent"),
         context_budget=context_budget,
         permission_manager=manager,
     )
@@ -332,6 +352,40 @@ def _synthesize_answer(
     return str(response.get("content", "")).strip() or evidence
 
 
+def _repair_research_answer(
+    backend: Any,
+    task: str,
+    evidence: str,
+    answer: str,
+) -> str:
+    response = backend.chat([
+        {"role": "system", "content": SYNTHESIS_PROMPT},
+        {"role": "user", "content": (
+            _research_answer_repair_prompt(task, answer)
+            + "\n\n现在禁止调用工具；请只基于下面已有子 agent 输出和工具证据重写最终答案。"
+            + "如果证据中存在 URL、arXiv ID、论文页、项目页或仓库地址，必须在最终答案中保留为可点击链接。"
+            + "如果证据中确实没有来源链接，必须明确写出“未找到可点击来源链接”并说明缺口。\n\n"
+            f"已有子 agent 输出和证据：\n{evidence}"
+        )},
+    ], tools=[])
+    return str(response.get("content", "")).strip() or answer
+
+
+def _has_source_reference(text: str) -> bool:
+    lowered = text.lower()
+    return "http://" in lowered or "https://" in lowered or "arxiv:" in lowered
+
+
+def _main_agent_task(original_task: str, main_task: str) -> str:
+    main_task = (main_task or original_task).strip()
+    if not main_task or main_task == original_task:
+        return original_task
+    return (
+        f"原始用户任务：\n{original_task}\n\n"
+        f"主 Agent 决定直接执行的具体任务：\n{main_task}"
+    )
+
+
 def run_multi_agent(
     *,
     task: str,
@@ -347,6 +401,7 @@ def run_multi_agent(
     auto_approve: bool = False,
     confirm_callback: Callable[..., Any] | None = None,
     context_budget: int = 20000,
+    event_callback: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> str:
     """Let the main agent decide whether and how to use role-based subagents."""
     workdir = Path(workdir).resolve()
@@ -359,10 +414,19 @@ def run_multi_agent(
         "orchestration",
         plan=orchestration,
     )
+    if event_callback is not None:
+        event_callback("orchestration", {
+            "use_subagents": orchestration["use_subagents"],
+            "reason": orchestration.get("reason", ""),
+            "assignments": orchestration.get("assignments", {}),
+        })
     if not orchestration["use_subagents"]:
         direct_backend = vision_backend if image_paths and vision_backend is not None else backend
-        return _run_main_agent(
-            task=orchestration["main_task"] or task,
+        main_task = _main_agent_task(task, orchestration["main_task"] or task)
+        if event_callback is not None:
+            event_callback("main_agent_start", {"task": main_task})
+        answer = _run_main_agent(
+            task=main_task,
             backend=direct_backend,
             registry=registry,
             system_prompt=system_prompt,
@@ -373,8 +437,12 @@ def run_multi_agent(
             auto_approve=auto_approve,
             confirm_callback=confirm_callback,
             context_budget=context_budget,
+            event_callback=event_callback,
             image_paths=image_paths if direct_backend is vision_backend else None,
         )
+        if event_callback is not None:
+            event_callback("main_agent_done", {})
+        return answer
 
     assignments = dict(orchestration.get("assignments") or {})
     role_outputs: list[tuple[str, str]] = [(
@@ -387,6 +455,8 @@ def run_multi_agent(
 
     multimodal_task = str(assignments.get("multimodal", "") or "").strip()
     if multimodal_task and image_paths and vision_backend is not None:
+        if event_callback is not None:
+            event_callback("subagent_start", {"role": "Multimodal Agent", "assignment": multimodal_task})
         output, evidence_part = _run_role(
             role="multimodal",
             role_prompt=system_prompt + "\n\n" + MULTIMODAL_PROMPT,
@@ -401,8 +471,11 @@ def run_multi_agent(
             auto_approve=auto_approve,
             confirm_callback=confirm_callback,
             context_budget=context_budget,
+            event_callback=event_callback,
             image_paths=image_paths,
         )
+        if event_callback is not None:
+            event_callback("subagent_done", {"role": "Multimodal Agent"})
         role_outputs.append((
             "Multimodal Agent",
             output,
@@ -410,11 +483,18 @@ def run_multi_agent(
         if evidence_part:
             tool_evidence.append(evidence_part)
     elif multimodal_task and image_paths:
+        if event_callback is not None:
+            event_callback("subagent_done", {
+                "role": "Multimodal Agent",
+                "skipped": True,
+            })
         role_outputs.append((
             "Multimodal Agent",
             "未运行：本次任务包含图像输入，但视觉后端不可用；未把图像转交给纯文本后端。",
         ))
     elif multimodal_task:
+        if event_callback is not None:
+            event_callback("subagent_start", {"role": "Multimodal Agent", "assignment": multimodal_task})
         output, evidence_part = _run_role(
             role="multimodal",
             role_prompt=system_prompt + "\n\n" + MULTIMODAL_PROMPT,
@@ -429,7 +509,10 @@ def run_multi_agent(
             auto_approve=auto_approve,
             confirm_callback=confirm_callback,
             context_budget=context_budget,
+            event_callback=event_callback,
         )
+        if event_callback is not None:
+            event_callback("subagent_done", {"role": "Multimodal Agent"})
         role_outputs.append((
             "Multimodal Agent",
             output,
@@ -439,6 +522,8 @@ def run_multi_agent(
 
     research_task = str(assignments.get("research", "") or "").strip()
     if research_task:
+        if event_callback is not None:
+            event_callback("subagent_start", {"role": "Research Agent", "assignment": research_task})
         output, evidence_part = _run_role(
             role="research",
             role_prompt=system_prompt + "\n\n" + RESEARCH_PROMPT,
@@ -453,7 +538,10 @@ def run_multi_agent(
             auto_approve=auto_approve,
             confirm_callback=confirm_callback,
             context_budget=context_budget,
+            event_callback=event_callback,
         )
+        if event_callback is not None:
+            event_callback("subagent_done", {"role": "Research Agent"})
         role_outputs.append((
             "Research Agent",
             output,
@@ -463,6 +551,8 @@ def run_multi_agent(
 
     engineering_task = str(assignments.get("engineering", "") or "").strip()
     if engineering_task:
+        if event_callback is not None:
+            event_callback("subagent_start", {"role": "Engineering Agent", "assignment": engineering_task})
         output, evidence_part = _run_role(
             role="engineering",
             role_prompt=system_prompt + "\n\n" + ENGINEERING_PROMPT,
@@ -477,7 +567,10 @@ def run_multi_agent(
             auto_approve=auto_approve,
             confirm_callback=confirm_callback,
             context_budget=context_budget,
+            event_callback=event_callback,
         )
+        if event_callback is not None:
+            event_callback("subagent_done", {"role": "Engineering Agent"})
         role_outputs.append((
             "Engineering Agent",
             output,
@@ -486,8 +579,11 @@ def run_multi_agent(
             tool_evidence.append(evidence_part)
 
     if len(role_outputs) == 1:
-        return _run_main_agent(
-            task=orchestration["main_task"] or task,
+        main_task = _main_agent_task(task, orchestration["main_task"] or task)
+        if event_callback is not None:
+            event_callback("main_agent_start", {"task": main_task})
+        answer = _run_main_agent(
+            task=main_task,
             backend=backend,
             registry=registry,
             system_prompt=system_prompt,
@@ -498,27 +594,60 @@ def run_multi_agent(
             auto_approve=auto_approve,
             confirm_callback=confirm_callback,
             context_budget=context_budget,
+            event_callback=event_callback,
         )
+        if event_callback is not None:
+            event_callback("main_agent_done", {})
+        return answer
 
     evidence = "\n\n".join(f"## {role}\n{content}" for role, content in role_outputs)
+    if event_callback is not None:
+        event_callback("synthesis_start", {})
     answer = _synthesize_answer(backend, task, evidence)
+    repair_attempts = 0
+    while (
+        repair_attempts < 2
+        and _has_source_reference(evidence)
+        and _is_insufficient_research_answer(task, answer)
+    ):
+        repair_attempts += 1
+        _append_trace_event(
+            trace_path,
+            parent_run_id,
+            "final_blocked",
+            reason="insufficient_research_answer",
+            phase="synthesis",
+            attempt=repair_attempts,
+        )
+        if event_callback is not None:
+            event_callback("research_answer_repair", {"attempt": repair_attempts})
+        answer = _repair_research_answer(backend, task, evidence, answer)
+    if event_callback is not None:
+        event_callback("synthesis_done", {})
     reviewer_evidence = (
         "# 子 agent 工具调用记录\n"
         + ("\n\n".join(tool_evidence) if tool_evidence else "（子 agent 没有产生工具调用记录）")
         + "\n\n# 子 agent 输出\n"
         + evidence
     )
+    if event_callback is not None:
+        event_callback("review_start", {})
     review = review_answer(backend, task, answer, reviewer_evidence)
+    needs_revision = review_needs_revision(review)
+    if event_callback is not None:
+        event_callback("review_done", {"needs_revision": needs_revision})
     _append_trace_event(
         trace_path,
         parent_run_id,
         "review",
         phase="initial",
-        status="needs_revision" if review_needs_revision(review) else "passed",
+        status="needs_revision" if needs_revision else "passed",
         content=review,
         evidence=reviewer_evidence[:5000],
     )
-    if review_needs_revision(review):
+    if needs_revision:
+        if event_callback is not None:
+            event_callback("revision_start", {})
         answer = _synthesize_answer(
             backend,
             task,
@@ -526,13 +655,39 @@ def run_multi_agent(
             previous_answer=answer,
             review=review,
         )
+        repair_attempts = 0
+        while (
+            repair_attempts < 2
+            and _has_source_reference(evidence)
+            and _is_insufficient_research_answer(task, answer)
+        ):
+            repair_attempts += 1
+            _append_trace_event(
+                trace_path,
+                parent_run_id,
+                "final_blocked",
+                reason="insufficient_research_answer",
+                phase="revision",
+                attempt=repair_attempts,
+            )
+            if event_callback is not None:
+                event_callback("research_answer_repair", {"phase": "revision", "attempt": repair_attempts})
+            answer = _repair_research_answer(backend, task, evidence, answer)
+        if event_callback is not None:
+            event_callback("review_start", {"phase": "final"})
         final_review = review_answer(backend, task, answer, reviewer_evidence)
+        final_needs_revision = review_needs_revision(final_review)
+        if event_callback is not None:
+            event_callback("review_done", {
+                "phase": "final",
+                "needs_revision": final_needs_revision,
+            })
         _append_trace_event(
             trace_path,
             parent_run_id,
             "review",
             phase="final",
-            status="needs_revision" if review_needs_revision(final_review) else "passed",
+            status="needs_revision" if final_needs_revision else "passed",
             content=final_review,
             initial_review=review,
             answer_revised=True,

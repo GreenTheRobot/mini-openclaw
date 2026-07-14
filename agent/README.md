@@ -10,7 +10,7 @@
 
 `permissions.py` 提供 `plan/default/accept-edits/auto-safe` 四种模式。网络读取授权可按精确工具与域名保存到当前任务或会话；微信真实发送、bash 与实验执行不会被 `auto-safe` 静默放行。
 
-交互中可使用 `/mode`、`/permissions`、`/steps`、`/audit` 和 `/verbose on|off`。
+交互中可使用 `/mode`、`/permissions`、`/steps`、`/audit` 和 `/verbose on|off`。默认输出会显示主 Agent 调度、子 Agent 启停、综合、后台审核和可恢复失败等可观察进度；这不是模型内部推理逐字展示，而是让用户知道系统正在执行哪一段工作。需要看每次模型轮次和工具调用/结果时，使用 `/verbose on`。
 
 ## 跨会话长期记忆
 
@@ -29,6 +29,8 @@
 当前编排顺序是主 Agent 先做全局调度：判断是否启用子 agent，并输出结构化分工方案。简单、单步、无需跨角色协作的任务会由主 Agent 直接执行，不启动子 agent；复杂任务、需要多源证据、代码实验、论文/图表联合分析或用户明确要求子 agent 时，主 Agent 才会分配具体工作给 Research、Engineering 和 Multimodal Agent。Research Agent 负责论文、网页、PDF 和图表证据，Engineering Agent 负责执行型、集成型和验证型工作并拥有完整工具集，附带图片时可增加 Multimodal Agent。Reviewer 基于**子 agent 工具调用记录及其输出**审查关键依据和风险。Reviewer 是质量护栏，不是最终答案的主题；论文类任务的最终正文仍以论文分析、方法理解和结论讨论为中心。
 
 每个子 agent 复用现有 `AgentLoop`、权限层、工具注册表和 Trace，但会分配 `.mini-openclaw/subagents/<parent-run>/<role>/tasks.json` 作为独立 TODO，避免多角色互相覆盖状态。子 agent trace 写入主 trace 同目录下的 `subagents/`。
+
+多 Agent 执行时会把主调度、子 Agent 开始/完成、综合、Reviewer 后台检查和必要修订作为实时事件打印出来；子 Agent 内部的工具调用也会接入同一个事件流，安静模式只显示关键失败，`/verbose on` 会显示完整工具调用进度。
 
 后端选择采用文本主后端加视觉旁路：普通任务只初始化并使用 DeepSeek 文本后端；只有命令带 `--image` 时才额外初始化 Qwen 视觉后端。多 Agent 模式下主 Agent、Research、Engineering、Synthesis 和 Reviewer 继续使用文本后端，**只有带直接图像输入的 Multimodal Agent 接收图像并使用视觉后端**，避免昂贵视觉模型被非图像角色继承使用。单 Agent 且带图运行时才把该轮交给视觉后端。
 

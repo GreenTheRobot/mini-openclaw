@@ -43,6 +43,28 @@ def test_verbose_renderer_shows_observable_tool_events():
     assert "[ok] read" in text
 
 
+def test_quiet_renderer_shows_multi_agent_progress_without_tool_details():
+    output = []
+    renderer = EventRenderer(output.append, verbose=False)
+    renderer.begin_turn()
+
+    renderer("orchestration", {"use_subagents": True, "reason": "需要分工"})
+    renderer("subagent_start", {"role": "Research Agent", "assignment": "读取 paper.md 并总结"})
+    renderer("tool_start", {"name": "read", "arguments": {"path": "paper.md"}})
+    renderer("tool_result", {"name": "read", "success": True, "observation": "paper content"})
+    renderer("subagent_done", {"role": "Research Agent"})
+    renderer("synthesis_start", {})
+    renderer("review_start", {})
+
+    visible = "\n".join(output)
+    assert "主 Agent 调度" in visible
+    assert "Research Agent 开始" in visible
+    assert "Research Agent 完成" in visible
+    assert "正在综合" in visible
+    assert "Reviewer" in visible
+    assert "paper content" not in visible
+
+
 def test_renderer_can_load_steps_from_trace_files(tmp_path):
     trace = tmp_path / "sub.jsonl"
     trace.write_text(
