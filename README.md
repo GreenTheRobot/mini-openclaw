@@ -5,12 +5,12 @@
 本项目已扩展为命令行科研智能体：能够规划长任务、检索与阅读论文、理解和修改科研代码、准备/监控实验、解析日志、生成可复现报告，并通过 MCP、Skills、多模态、记忆、安全层和 Trace 扩展。
 
 ```powershell
-python -m agent.cli --selfcheck
+.\claw --selfcheck
 python -m pytest -q tests
-python -m agent.cli
+.\claw
 ```
 
-直接运行 `python -m agent.cli` 会进入持续交互会话：
+直接运行 `.\claw`（Windows）或 `./claw`（macOS/Linux/WSL）会进入持续交互会话：
 
 ```text
 mini-openclaw> 分析当前项目，告诉我训练入口
@@ -25,8 +25,19 @@ mini-openclaw> /exit
 一次性命令仍然可用：
 
 ```powershell
-python -m agent.cli "分析这个科研项目并告诉我训练入口" --trace traces/demo.jsonl
+.\claw "分析这个科研项目并告诉我训练入口" --trace traces/demo.jsonl
 ```
+
+如果想像 `claude` 一样在任意目录直接敲命令，可在当前环境执行一次：
+
+```powershell
+pip install -e .
+claw
+# 或
+openclaw
+```
+
+底层入口仍是 `python -m agent.cli`；`claw`/`openclaw` 只是把长命令包装成短命令。
 
 关键文档：
 

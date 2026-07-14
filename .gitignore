@@ -16,3 +16,4 @@ traces/
 demo_project/model.txt
 .pytest-work/
 .pytest_cache/
+mini_openclaw.egg-info/
