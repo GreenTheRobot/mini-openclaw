@@ -93,6 +93,28 @@ class RevisionBackend(NoToolBackend):
             return {"content": "审查结论：通过\n已补充风险说明。", "tool_calls": []}
         return {"content": "Research Agent 输出：证据。", "tool_calls": []}
 
+class FinalReviewRejectBackend(NoToolBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.review_calls = 0
+        self.final_delivery_calls = 0
+
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        if "JSON" in system:
+            return {"content": '{"use_subagents": true, "reason": "needs evidence", "main_task": "", "assignments": {"research": "provide evidence", "engineering": "", "multimodal": ""}}', "tool_calls": []}
+        if "Research Agent" in system:
+            return {"content": "research output", "tool_calls": []}
+        if "最终答复作者" in system:
+            self.final_delivery_calls += 1
+            return {"content": "实验结果：没有可核验的运行数据，因此不能给出指标对比。已确认缺口是 key result has no evidence；需要实际运行训练命令后再填入结果表。", "tool_calls": []}
+        if "coordinator" in system:
+            return {"content": "unsupported final answer", "tool_calls": []}
+        if "Reviewer" in system or "Reviewer" in str(messages):
+            self.review_calls += 1
+            return {"content": "审查结论：需修订\n1. key result has no evidence.", "tool_calls": []}
+        return {"content": "ok", "tool_calls": []}
+
 
 class DirectDecisionBackend(NoToolBackend):
     def __init__(self) -> None:
@@ -204,6 +226,94 @@ class EngineeringToolBackend(NoToolBackend):
             return {"content": "综合结果。", "tool_calls": []}
         if "Reviewer" in system or "Reviewer" in str(messages):
             return {"content": "审查结论：通过。", "tool_calls": []}
+        return {"content": "ok", "tool_calls": []}
+
+
+class ResearchBashBackend(NoToolBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.sent_tool_call = False
+        self.saw_bash = False
+        self.research_message = ""
+
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        if "JSON" in system:
+            return {
+                "content": (
+                    '{"use_subagents": true, "reason": "needs research execution", '
+                    '"main_task": "", "assignments": {"research": "use bash to inspect local environment", '
+                    '"engineering": "", "multimodal": ""}}'
+                ),
+                "tool_calls": [],
+            }
+        if "Research Agent" in system:
+            if not self.research_message:
+                self.research_message = str(messages[-1].get("content", ""))
+            tool_names = {tool["function"]["name"] for tool in tools or []}
+            self.saw_bash = "bash" in tool_names
+            if self.saw_bash and not self.sent_tool_call:
+                self.sent_tool_call = True
+                return {
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_bash",
+                        "name": "bash",
+                        "arguments": {"command": "printf research-bash"},
+                    }],
+                }
+            return {"content": "Research bash done.", "tool_calls": []}
+        if "coordinator" in system:
+            return {"content": "synthesis done.", "tool_calls": []}
+        if "Reviewer" in system or "Reviewer" in str(messages):
+            return {"content": "review passed.", "tool_calls": []}
+        return {"content": "ok", "tool_calls": []}
+
+
+class MultimodalBashBackend(NoToolBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.sent_tool_call = False
+        self.saw_bash = False
+        self.saw_image = False
+
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        if "JSON" in system:
+            return {
+                "content": (
+                    '{"use_subagents": true, "reason": "needs multimodal execution", '
+                    '"main_task": "", "assignments": {"research": "", "engineering": "", '
+                    '"multimodal": "inspect the image and local environment"}}'
+                ),
+                "tool_calls": [],
+            }
+        if "Multimodal Agent" in system:
+            for message in messages:
+                content = message.get("content")
+                if isinstance(content, list) and any(
+                    block.get("type") == "image"
+                    for block in content
+                    if isinstance(block, dict)
+                ):
+                    self.saw_image = True
+            tool_names = {tool["function"]["name"] for tool in tools or []}
+            self.saw_bash = "bash" in tool_names
+            if self.saw_bash and not self.sent_tool_call:
+                self.sent_tool_call = True
+                return {
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_bash",
+                        "name": "bash",
+                        "arguments": {"command": "printf multimodal-bash"},
+                    }],
+                }
+            return {"content": "Multimodal bash done.", "tool_calls": []}
+        if "coordinator" in system:
+            return {"content": "synthesis done.", "tool_calls": []}
+        if "Reviewer" in system or "Reviewer" in str(messages):
+            return {"content": "review passed.", "tool_calls": []}
         return {"content": "ok", "tool_calls": []}
 
 
@@ -394,6 +504,73 @@ def test_engineering_agent_receives_full_tool_registry(tmp_path: Path):
     assert backend.sent_tool_call is True
 
 
+def test_research_agent_receives_full_tool_registry_including_bash(tmp_path: Path):
+    backend = ResearchBashBackend()
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="bash",
+        description="run shell",
+        parameters={
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+        run=lambda command: f"ran: {command}",
+    ))
+
+    run_multi_agent(
+        task="let the research subagent inspect the local environment",
+        backend=backend,
+        registry=registry,
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=tmp_path / "trace.jsonl",
+        parent_run_id="parent",
+        permission_mode="auto-local",
+    )
+
+    assert backend.saw_bash is True
+    assert backend.sent_tool_call is True
+    assert tmp_path.as_posix() in backend.research_message.replace("\\", "/")
+    assert "不要假设存在 `/workspace`" in backend.research_message
+
+
+def test_multimodal_agent_receives_full_tool_registry_including_bash(tmp_path: Path):
+    image_path = tmp_path / "figure.png"
+    Image.new("RGB", (1, 1), "white").save(image_path)
+    backend = MultimodalBashBackend()
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="bash",
+        description="run shell",
+        parameters={
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+        run=lambda command: f"ran: {command}",
+    ))
+
+    run_multi_agent(
+        task="let the multimodal subagent inspect the image and local environment",
+        backend=backend,
+        vision_backend=backend,
+        registry=registry,
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=tmp_path / "trace.jsonl",
+        parent_run_id="parent",
+        image_paths=[str(image_path)],
+        permission_mode="auto-local",
+    )
+
+    assert backend.saw_image is True
+    assert backend.saw_bash is True
+    assert backend.sent_tool_call is True
+
+
 def test_multi_agent_repairs_research_answer_when_synthesis_drops_links(tmp_path: Path):
     backend = LinkRepairBackend()
     trace = tmp_path / "trace.jsonl"
@@ -490,5 +667,32 @@ def test_multi_agent_revises_answer_when_reviewer_requests_changes(tmp_path: Pat
     assert '"event": "review"' in log
     assert '"phase": "initial"' in log
     assert '"phase": "final"' in log
+
+
+def test_multi_agent_delivers_user_answer_when_final_review_still_requests_changes(tmp_path: Path):
+    backend = FinalReviewRejectBackend()
+    trace = tmp_path / "trace.jsonl"
+
+    answer = run_multi_agent(
+        task="run an experiment and report results",
+        backend=backend,
+        registry=ToolRegistry(),
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=trace,
+        parent_run_id="parent",
+    )
+
+    assert backend.review_calls == 2
+    assert backend.final_delivery_calls == 1
+    assert "unsupported final answer" not in answer
+    assert "实验结果" in answer
+    assert "key result has no evidence" in answer
+    assert "当前还不能把这次任务报告为已完成" not in answer
+    assert "最终质量审查仍要求修订" not in answer
+    assert "审查结论" not in answer
+    log = trace.read_text(encoding="utf-8")
+    assert '"phase": "final"' in log
+    assert '"status": "needs_revision"' in log
+    assert '"event": "final_delivery_repair"' in log
     assert "审查结论：需修订" in log
-    assert "审查结论：通过" in log

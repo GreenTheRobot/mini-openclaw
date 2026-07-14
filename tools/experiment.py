@@ -157,6 +157,54 @@ def _save(directory: Path, metadata: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+
+
+def _log_declares_failure(text: str) -> bool:
+    lowered = text.lower()
+    failure_markers = (
+        "status=failed", "status: failed", "status failed",
+        "status=error", "status: error", "traceback", "exception",
+        "failed",
+    )
+    return any(marker in lowered for marker in failure_markers)
+
+
+def _log_declares_success(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in ("status=completed", "status: completed", "status=success"))
+
+
+def _refresh_status(directory: Path, metadata: dict[str, Any]) -> dict[str, Any]:
+    log_path = directory / "train.log"
+    error_path = directory / "error.log"
+    returncode_path = directory / "returncode.txt"
+    log = _read_text(log_path)
+    error = _read_text(error_path)
+    returncode: int | None = None
+    if returncode_path.exists():
+        raw_returncode = returncode_path.read_text(encoding="utf-8", errors="replace").strip()
+        try:
+            returncode = int(raw_returncode)
+        except ValueError:
+            metadata["returncode_parse_error"] = raw_returncode
+    running = bool(metadata.get("pid")) and _pid_running(int(metadata["pid"]))
+    finished = returncode is not None or (metadata.get("status") == "running" and not running)
+    if returncode is not None:
+        metadata["returncode"] = returncode
+    if finished:
+        if returncode not in (None, 0) or error.strip() or _log_declares_failure(log):
+            metadata["status"] = "failed"
+        elif _log_declares_success(log) or returncode == 0:
+            metadata["status"] = "completed"
+        else:
+            metadata["status"] = "unknown"
+        metadata.setdefault("finished_at", time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+        _save(directory, metadata)
+    return {**metadata, "running": running, "log_tail": log[-2000:], "error_tail": error[-2000:]}
+
+
 def _experiment_prepare(command: str, name: str = "experiment", config: str = "", seed: int = 42) -> str:
     git = _git_context()
     if not git["git_repository"]:
@@ -216,6 +264,33 @@ def _experiment_start(run_id: str) -> str:
         raise ValueError("实验命令触发高危命令拦截")
     if metadata["status"] not in {"prepared", "failed"}:
         raise ValueError(f"实验当前状态不可启动：{metadata['status']}")
+    command = metadata["command"]
+    returncode_path = directory / "returncode.txt"
+    if returncode_path.exists():
+        returncode_path.unlink()
+    if os.name == "nt":
+        runner = directory / "run.cmd"
+        runner.write_text(
+            "@echo off\r\n"
+            f"{command}\r\n"
+            "set code=%ERRORLEVEL%\r\n"
+            f'> "{returncode_path.resolve()}" echo %code%\r\n'
+            "exit /b %code%\r\n",
+            encoding="utf-8",
+        )
+        command = f'"{runner.resolve()}"'
+    else:
+        runner = directory / "run.sh"
+        escaped_returncode_path = str(returncode_path.resolve()).replace('"', '\\"')
+        runner.write_text(
+            "#!/bin/sh\n"
+            f"( {command} )\n"
+            "code=$?\n"
+            f'printf "%s" "$code" > "{escaped_returncode_path}"\n'
+            'exit "$code"\n',
+            encoding="utf-8",
+        )
+        command = f'sh "{runner.resolve()}"'
     stdout = (directory / "train.log").open("a", encoding="utf-8")
     stderr = (directory / "error.log").open("a", encoding="utf-8")
     kwargs: dict[str, Any] = {
@@ -225,7 +300,7 @@ def _experiment_start(run_id: str) -> str:
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         kwargs["start_new_session"] = True
-    process = subprocess.Popen(metadata["command"], **kwargs)
+    process = subprocess.Popen(command, **kwargs)
     stdout.close()
     stderr.close()
     metadata.update({
@@ -246,16 +321,8 @@ def _pid_running(pid: int) -> bool:
 
 def _experiment_status(run_id: str) -> str:
     directory, metadata = _load(run_id)
-    running = bool(metadata.get("pid")) and _pid_running(int(metadata["pid"]))
-    if metadata.get("status") == "running" and not running:
-        error_path = directory / "error.log"
-        error_text = error_path.read_text(encoding="utf-8", errors="replace") if error_path.exists() else ""
-        metadata["status"] = "failed" if error_text.strip() else "completed"
-        metadata["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-        _save(directory, metadata)
-    log_path = directory / "train.log"
-    tail = log_path.read_text(encoding="utf-8", errors="replace")[-2000:] if log_path.exists() else ""
-    return json.dumps({**metadata, "running": running, "log_tail": tail}, ensure_ascii=False, indent=2)
+    status = _refresh_status(directory, metadata)
+    return json.dumps(status, ensure_ascii=False, indent=2)
 
 
 def _extract_metrics(text: str) -> dict[str, list[float]]:
@@ -265,12 +332,13 @@ def _extract_metrics(text: str) -> dict[str, list[float]]:
     return metrics
 
 
-def _experiment_report(run_id: str) -> str:
+def _experiment_report(run_id: str) -> str | ToolResult:
     directory, metadata = _load(run_id)
+    metadata = _refresh_status(directory, metadata)
     log_path = directory / "train.log"
     error_path = directory / "error.log"
-    log = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
-    error = error_path.read_text(encoding="utf-8", errors="replace") if error_path.exists() else ""
+    log = _read_text(log_path)
+    error = _read_text(error_path)
     metrics = _extract_metrics(log)
     lines = [
         f"# 实验报告：{metadata['name']}", "", f"- Run ID：`{run_id}`",
@@ -298,7 +366,12 @@ def _experiment_report(run_id: str) -> str:
     report = "\n".join(lines) + "\n"
     path = directory / "report.md"
     path.write_text(report, encoding="utf-8")
-    return f"报告已生成：{path}\n\n{report}"
+    content = f"报告已生成：{path}\n\n{report}"
+    if metadata.get("status") == "failed":
+        return ToolResult(content, False, "experiment_failed")
+    if metadata.get("status") not in {"prepared", "completed"}:
+        return ToolResult(content, False, "experiment_status_unknown")
+    return content
 
 
 experiment_prepare_tool = Tool(

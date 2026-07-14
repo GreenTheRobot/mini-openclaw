@@ -77,6 +77,7 @@ def is_dangerous_command(command: str) -> bool:
 
 
 def _bash(command: str, timeout: int = 30) -> ToolResult:
+    cwd = os.getcwd()
     if is_dangerous_command(command):
         return ToolResult(f"[沙箱] 拒绝执行高危命令：{command}", False, "sandbox_denied")
 
@@ -93,6 +94,7 @@ def _bash(command: str, timeout: int = 30) -> ToolResult:
         output += f"\n[stderr]\n{process.stderr}"
     if process.returncode != 0:
         output += f"\n[returncode={process.returncode}]"
+        output += f"\n[cwd={cwd}]"
         return ToolResult(output.strip(), False, "nonzero_exit")
     return ToolResult(output.strip() or "[无输出]", True, "ok")
 

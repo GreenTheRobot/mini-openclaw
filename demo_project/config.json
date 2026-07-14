@@ -1,5 +1,6 @@
 {
-  "epochs": 3,
+  "epochs": 8,
   "seed": 42,
-  "learning_rate": 0.1
+  "learning_rate": 0.2,
+  "samples": 24
 }
