@@ -29,9 +29,11 @@ _configure_terminal_encoding()
 try:
     from rich.console import Console
     from rich.markdown import Markdown
+    from rich.text import Text
 except ImportError:  # pragma: no cover
     Console = None
     Markdown = None
+    Text = None
 
 _console = Console(markup=False) if Console else None
 
@@ -42,6 +44,21 @@ def _print(text: str = "") -> None:
     else:
         print(text)
 
+
+def _print_rich(text: Any) -> None:
+    if _console:
+        _console.print(text)
+    else:
+        print(str(text))
+
+
+def _text(*parts: tuple[str, str]) -> Any:
+    if not Text:
+        return "".join(value for value, _style in parts)
+    result = Text()
+    for value, style in parts:
+        result.append(value, style=style)
+    return result
 
 def _print_markdown(text: str) -> None:
     if _console and Markdown:
@@ -73,27 +90,41 @@ def _confirm_tool_call(name: str, arguments: dict[str, Any],
 
 
 def _render_agent_event(event: str, payload: dict[str, Any]) -> None:
-    """把主循环事件转换成用户可见的简洁状态，而不是暴露隐藏推理。"""
+    """把主循环事件转换成用户可见的彩色状态，而不是暴露隐藏推理。"""
     if event == "model_start":
-        _print(f"\n[model] 第 {payload.get('turn')} 步：正在决定下一步...")
+        _print_rich(_text(
+            ("\n[model]", "bold cyan"),
+            (f" 第 {payload.get('turn')} 步：正在决定下一步...", "default"),
+        ))
     elif event == "tool_start":
         arguments = json.dumps(payload.get("arguments"), ensure_ascii=False)
         if len(arguments) > 180:
             arguments = arguments[:177] + "..."
-        _print(f"\n[tool] {payload.get('name')} {arguments}")
+        _print_rich(_text(
+            ("\n[tool]", "bold magenta"),
+            (f" {payload.get('name')} ", "bold white"),
+            (arguments, "dim"),
+        ))
     elif event == "tool_result":
         status = "ok" if payload.get("success") else "error"
         observation = str(payload.get("observation", "")).replace("\n", " ")
         if len(observation) > 220:
             observation = observation[:217] + "..."
-        _print(f"[{status}] {payload.get('name')}: {observation}")
+        status_style = "bold green" if payload.get("success") else "bold red"
+        _print_rich(_text(
+            (f"[{status}]", status_style),
+            (f" {payload.get('name')}: ", "bold white"),
+            (observation, "default"),
+        ))
     elif event == "context_loaded":
-        _print(f"[context] 已加载 {payload.get('key')}")
+        _print_rich(_text(("[context]", "bold blue"), (f" 已加载 {payload.get('key')}", "default")))
     elif event == "compaction":
-        _print(f"[context] 已压缩历史：约 {payload.get('before')} → {payload.get('after')} tokens")
+        _print_rich(_text(
+            ("[context]", "bold blue"),
+            (f" 已压缩历史：约 {payload.get('before')} → {payload.get('after')} tokens", "default"),
+        ))
     elif event == "session_reset":
-        _print("[session] 当前对话上下文已清空，磁盘记忆保持不变。")
-
+        _print_rich(_text(("[session]", "bold blue"), (" 当前对话上下文已清空，磁盘记忆保持不变。", "default")))
 
 def selfcheck() -> int:
     _print("== mini-OpenClaw 自检 ==")
@@ -175,10 +206,31 @@ def _show_help() -> None:
 def _interactive(agent: Any, backend: Any, registry: ToolRegistry, tracer: Any,
                  trace_path: Path, skills: list[Any], review_enabled: bool,
                  planning_enabled: bool) -> int:
-    _print("\nmini-OpenClaw 科研智能体")
-    _print(f"工作目录：{Path.cwd()}")
-    _print(f"工具：{len(registry)} 个  Skills：{len(skills)} 个  Trace：{trace_path}")
-    _print("输入 /help 查看命令，输入 /exit 退出。\n")
+    _print_rich(_text(("\nmini-OpenClaw 科研智能体", "bold white")))
+    _print("直接输入自然语言即可继续同一个多轮会话。")
+    _print_rich(_text(
+        ("常用：", "default"),
+        ("/help", "bold magenta"),
+        (" 帮助 · ", "default"),
+        ("/tools", "bold magenta"),
+        (" 工具 · ", "default"),
+        ("/trace", "bold magenta"),
+        (" Trace · ", "default"),
+        ("/review", "bold magenta"),
+        (" 审查 · ", "default"),
+        ("/exit", "bold magenta"),
+        (" 退出", "default"),
+    ))
+    _print_rich(_text(("工作目录：", "default"), (str(Path.cwd()), "bold white")))
+    _print_rich(_text(
+        ("工具：", "default"),
+        (str(len(registry)), "bold cyan"),
+        (" 个  Skills：", "default"),
+        (str(len(skills)), "bold cyan"),
+        (" 个  Trace：", "default"),
+        (str(trace_path), "bold white"),
+        ("\n", "default"),
+    ))
     while True:
         try:
             task = _input("mini-openclaw> ").strip()
@@ -253,9 +305,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--selfcheck", action="store_true", help="只做系统自检")
     parser.add_argument("--image", action="append", default=[], help="为单次任务附加图片，可重复")
     parser.add_argument("--auto-approve", action="store_true", help="自动确认高风险工具，仅用于隔离评测")
+    parser.add_argument("--permission-mode", choices=["plan", "default", "accept-edits", "auto-safe"], help="兼容旧版参数；当前 dev 版本仍使用 --auto-approve 控制自动确认")
     parser.add_argument("--trace", help="Trace JSONL 路径；默认写入 traces/")
     parser.add_argument("--no-mcp", action="store_true", help="禁用 MCP")
     parser.add_argument("--ablation", choices=["none", "no-memory", "no-planning", "minimal-prompt"], default="none")
+    parser.add_argument("--verbose", action="store_true", help="兼容旧版参数；当前版本默认显示彩色模型和工具事件")
     parser.add_argument("--review", action="store_true", help="开启 Reviewer")
     parser.add_argument("--context-budget", type=int, default=6000, help="触发历史压缩的估算 token 阈值")
     return parser
@@ -263,6 +317,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    if args.permission_mode:
+        _print_rich(_text(("[提示]", "bold yellow"), (" --permission-mode 是旧版兼容参数；当前 dev 版本仍使用 --auto-approve 控制自动确认。", "default")))
     if args.selfcheck:
         return selfcheck()
 
