@@ -172,6 +172,13 @@ def _ensure_session_todo_path(run_id: str) -> Path:
     return path
 
 
+def _related_trace_paths(trace_path: Path) -> list[Path]:
+    directory = trace_path.parent / "subagents"
+    if not directory.exists():
+        return [trace_path]
+    return [trace_path, *sorted(directory.glob(f"{trace_path.stem}.*.jsonl"))]
+
+
 def _prepare_turn_context(agent: Any, task: str, skills: list[Any], planning: bool,
                           memory_enabled: bool = True) -> None:
     if memory_enabled:
@@ -215,13 +222,13 @@ def _show_help() -> None:
 - `/tools`：列出当前工具
 - `/mode [plan|default|accept-edits|auto-safe]`：查看或切换权限模式
 - `/permissions [clear]`：查看或清空临时授权
-- `/steps`：查看上一轮可观察工具步骤
+- `/steps`：查看上一轮可观察工具步骤（含子 agent）
 - `/verbose on|off`：切换简洁/详细过程显示
 - `/audit`：按需审查上一轮回答
 - `/tasks`：查看任务清单
 - `/memory`：查看项目长期记忆
 - `/multi-agent [on|off]`：查看或切换轻量多 agent 编排
-- `/trace`：汇总当前会话 Trace；`/trace replay` 回放；`/trace cost` 成本；`/trace diagnose` 诊断；`/trace html [输出路径]` 生成 HTML
+- `/trace`：汇总当前会话 Trace（含子 agent trace）；`/trace replay` 回放；`/trace cost` 成本；`/trace diagnose` 诊断；`/trace html [输出路径]` 生成 HTML
 - `/status`：查看后端、权限、显示模式和会话状态
 - `/history`：查看当前对话消息摘要
 - `/clear` 或 `/new`：清空对话上下文和临时授权
@@ -283,6 +290,7 @@ def _interactive(
         _print("[提示] 交互模式不再自动追加 Reviewer；需要时输入 /audit。")
     last_task = ""
     last_answer = ""
+    last_turn_started_at: float | None = None
 
     while True:
         try:
@@ -338,6 +346,8 @@ def _interactive(
                 _print(f"详细过程显示已{'开启' if renderer.verbose else '关闭'}。")
             continue
         if command == "/steps":
+            if multi_agent_enabled:
+                renderer.load_trace_steps(_related_trace_paths(trace_path), since_ts=last_turn_started_at)
             _print_markdown(renderer.steps_markdown())
             continue
         if command in {"/audit", "/review"}:
@@ -377,7 +387,7 @@ def _interactive(
             from eval.trace_report import cost_report, diagnose, render_terminal, summarize, write_html
             trace_action, _, trace_output = argument.strip().partition(" ")
             if trace_action in {"", "summary"}:
-                _print(json.dumps(summarize(trace_path), ensure_ascii=False, indent=2))
+                _print(json.dumps(summarize(trace_path, include_children=True), ensure_ascii=False, indent=2))
             elif trace_action == "cost":
                 _print(json.dumps(cost_report(trace_path), ensure_ascii=False, indent=2))
             elif trace_action == "diagnose":
@@ -426,6 +436,7 @@ def _interactive(
             memory_enabled=memory_enabled,
         )
         renderer.begin_turn()
+        turn_started_at = time.time()
         try:
             if multi_agent_enabled:
                 from agent.subagents import run_multi_agent
@@ -442,10 +453,12 @@ def _interactive(
                     confirm_callback=agent.confirm_callback,
                     context_budget=context_budget,
                 )
+                renderer.load_trace_steps(_related_trace_paths(trace_path), since_ts=turn_started_at)
             else:
                 answer = agent.run(task)
             _print_markdown("\n" + answer)
             last_task, last_answer = task, answer
+            last_turn_started_at = turn_started_at
         except KeyboardInterrupt:
             _print("\n当前任务被用户中断，会话仍可继续。")
         except Exception as exc:
@@ -590,6 +603,7 @@ def main(argv: list[str] | None = None) -> int:
         memory_enabled=args.ablation != "no-memory",
     )
     renderer.begin_turn()
+    turn_started_at = time.time()
     if args.multi_agent:
         from agent.subagents import run_multi_agent
         answer = run_multi_agent(
@@ -607,6 +621,7 @@ def main(argv: list[str] | None = None) -> int:
             confirm_callback=_confirm_tool_call,
             context_budget=args.context_budget,
         )
+        renderer.load_trace_steps(_related_trace_paths(trace_path), since_ts=turn_started_at)
     else:
         if args.image and vision_backend is not None:
             vision_agent = AgentLoop(

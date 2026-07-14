@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 import os
 
 from agent.cli import _build_parser, _ensure_session_todo_path, _prepare_turn_context, _runtime_context
@@ -40,6 +41,61 @@ def test_verbose_renderer_shows_observable_tool_events():
     text = "\n".join(output)
     assert "[tool] read" in text
     assert "[ok] read" in text
+
+
+def test_renderer_can_load_steps_from_trace_files(tmp_path):
+    trace = tmp_path / "sub.jsonl"
+    trace.write_text(
+        json.dumps({
+            "event": "tool_result",
+            "tool": "read",
+            "arguments": {"path": "paper.md"},
+            "success": True,
+            "observation": "paper content",
+        }, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    renderer = EventRenderer(lambda text: None)
+    renderer.load_trace_steps([trace])
+
+    steps = renderer.steps_markdown()
+
+    assert "read" in steps
+    assert "paper.md" in steps
+    assert "paper content" in steps
+
+
+def test_renderer_load_trace_steps_filters_by_start_time(tmp_path):
+    trace = tmp_path / "sub.jsonl"
+    trace.write_text(
+        "\n".join([
+            json.dumps({
+                "ts": 10.0,
+                "event": "tool_result",
+                "tool": "old_tool",
+                "arguments": {},
+                "success": True,
+                "observation": "old",
+            }, ensure_ascii=False),
+            json.dumps({
+                "ts": 20.0,
+                "event": "tool_result",
+                "tool": "wechat_file_transfer",
+                "arguments": {"message": "晚上好"},
+                "success": True,
+                "observation": "sent",
+            }, ensure_ascii=False),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    renderer = EventRenderer(lambda text: None)
+    renderer.load_trace_steps([trace], since_ts=15.0)
+
+    steps = renderer.steps_markdown()
+
+    assert "wechat_file_transfer" in steps
+    assert "晚上好" in steps
+    assert "old_tool" not in steps
 
 def test_runtime_context_resolves_recent_week_to_exact_dates():
     context = _runtime_context(datetime(2026, 7, 13, tzinfo=timezone.utc))

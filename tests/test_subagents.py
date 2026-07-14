@@ -131,6 +131,35 @@ class AssignmentBackend(NoToolBackend):
         return {"content": "ok", "tool_calls": []}
 
 
+class EngineeringToolBackend(NoToolBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.sent_tool_call = False
+
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        if "主 Agent" in system and "JSON" in system:
+            return {"content": '{"use_subagents": true, "reason": "需要工程执行", "main_task": "", "assignments": {"research": "", "engineering": "调用 wechat_file_transfer 发送你好", "multimodal": ""}}', "tool_calls": []}
+        if "Engineering Agent" in system:
+            tool_names = {tool["function"]["name"] for tool in tools or []}
+            if "wechat_file_transfer" in tool_names and not self.sent_tool_call:
+                self.sent_tool_call = True
+                return {
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_wechat",
+                        "name": "wechat_file_transfer",
+                        "arguments": {"message": "你好"},
+                    }],
+                }
+            return {"content": "Engineering 完成发送。", "tool_calls": []}
+        if "coordinator" in system:
+            return {"content": "综合结果。", "tool_calls": []}
+        if "Reviewer" in system or "Reviewer" in str(messages):
+            return {"content": "审查结论：通过。", "tool_calls": []}
+        return {"content": "ok", "tool_calls": []}
+
+
 def test_subagent_todo_paths_are_role_isolated():
     assert _agent_todo_path("parent/run", "research") != _agent_todo_path("parent/run", "engineering")
     assert ".mini-openclaw/subagents/parent-run/research/tasks.json" == _agent_todo_path("parent/run", "research")
@@ -191,6 +220,34 @@ def test_main_agent_assigns_concrete_work_to_subagents(tmp_path: Path):
     assert answer == "综合结果。"
     assert "只阅读论文第 3 节并总结模型结构" in backend.research_message
     assert "只检查 tests/test_subagents.py 是否覆盖调度" in backend.engineering_message
+
+
+def test_engineering_agent_receives_full_tool_registry(tmp_path: Path):
+    backend = EngineeringToolBackend()
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="wechat_file_transfer",
+        description="send wechat",
+        parameters={
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+        run=lambda message: f"sent: {message}",
+    ))
+
+    run_multi_agent(
+        task="让工程子 agent 发送微信",
+        backend=backend,
+        registry=registry,
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=tmp_path / "trace.jsonl",
+        parent_run_id="parent",
+    )
+
+    assert backend.sent_tool_call is True
 
 
 def test_multi_agent_uses_vision_backend_only_for_images(tmp_path: Path):

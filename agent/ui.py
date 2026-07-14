@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Callable
 
 
@@ -94,6 +95,41 @@ class EventRenderer:
                 f"   - 结果：{observation or '无可见输出'}",
             ])
         return "\n".join(lines)
+
+    def load_trace_steps(self, paths: list[str | Path], max_events: int = 80,
+                         since_ts: float | None = None) -> None:
+        events: list[tuple[str, dict[str, Any]]] = []
+        for path in paths:
+            trace_path = Path(path)
+            if not trace_path.exists():
+                continue
+            for line in trace_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("event") != "tool_result":
+                    continue
+                if since_ts is not None and float(record.get("ts", 0)) < since_ts:
+                    continue
+                events.append((
+                    "tool_start",
+                    {
+                        "name": record.get("tool"),
+                        "arguments": record.get("arguments"),
+                    },
+                ))
+                events.append((
+                    "tool_result",
+                    {
+                        "name": record.get("tool"),
+                        "success": bool(record.get("success")),
+                        "observation": record.get("observation", ""),
+                    },
+                ))
+        self.last_events = events[-max_events:]
 
     def audit_evidence(self, max_chars: int = 5000) -> str:
         rows = []

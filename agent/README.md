@@ -26,7 +26,7 @@
 
 默认启用轻量多 Agent 编排；启动时可用 `--no-multi-agent` 禁用并回到单 Agent ReAct 主循环，`--multi-agent` 保留为显式开启/兼容开关。交互会话中可用 `/multi-agent on` 和 `/multi-agent off` 运行时切换，`/status` 会显示当前 `multi_agent` 状态。
 
-当前编排顺序是主 Agent 先做全局调度：判断是否启用子 agent，并输出结构化分工方案。简单、单步、无需跨角色协作的任务会由主 Agent 直接执行，不启动子 agent；复杂任务、需要多源证据、代码实验、论文/图表联合分析或用户明确要求子 agent 时，主 Agent 才会分配具体工作给 Research、Engineering 和 Multimodal Agent。Research Agent 负责论文、网页、PDF 和图表证据，Engineering Agent 负责代码阅读、修改建议、实验和验证，附带图片时可增加 Multimodal Agent。Reviewer 基于**子 agent 工具调用记录及其输出**审查关键依据和风险。Reviewer 是质量护栏，不是最终答案的主题；论文类任务的最终正文仍以论文分析、方法理解和结论讨论为中心。
+当前编排顺序是主 Agent 先做全局调度：判断是否启用子 agent，并输出结构化分工方案。简单、单步、无需跨角色协作的任务会由主 Agent 直接执行，不启动子 agent；复杂任务、需要多源证据、代码实验、论文/图表联合分析或用户明确要求子 agent 时，主 Agent 才会分配具体工作给 Research、Engineering 和 Multimodal Agent。Research Agent 负责论文、网页、PDF 和图表证据，Engineering Agent 负责执行型、集成型和验证型工作并拥有完整工具集，附带图片时可增加 Multimodal Agent。Reviewer 基于**子 agent 工具调用记录及其输出**审查关键依据和风险。Reviewer 是质量护栏，不是最终答案的主题；论文类任务的最终正文仍以论文分析、方法理解和结论讨论为中心。
 
 每个子 agent 复用现有 `AgentLoop`、权限层、工具注册表和 Trace，但会分配 `.mini-openclaw/subagents/<parent-run>/<role>/tasks.json` 作为独立 TODO，避免多角色互相覆盖状态。子 agent trace 写入主 trace 同目录下的 `subagents/`。
 
@@ -48,7 +48,7 @@
 请只完成 <role> 职责范围内的工作，并把证据、产物路径、失败原因和未完成项写清楚。
 ```
 
-工具上下文按角色裁剪：Research Agent 主要看到论文、网页、PDF、图表分析和记忆工具；Engineering Agent 主要看到代码读写、`bash`、实验和记忆工具；Multimodal Agent 主要看到图片、PDF 和图表分析相关工具。每个子 agent 运行时会临时设置 `MINI_OPENCLAW_TODO_PATH=.mini-openclaw/subagents/<parent-run>/<role>/tasks.json`，因此角色之间的 TODO 状态互不覆盖。子 agent trace 写入 `traces/subagents/<parent-trace-stem>.<role>.jsonl`。带 `--image` 时，只有 Multimodal Agent 收到 image block 并使用视觉后端；Research、Engineering、Synthesis 和 Reviewer 继续使用文本后端。
+工具上下文按角色设置：Research Agent 主要看到论文、网页、PDF、图表分析和记忆工具；Engineering Agent 使用完整工具注册表，适合真实执行、文件修改、实验、外部通知、调度和集成验证；Multimodal Agent 主要看到图片、PDF 和图表分析相关工具。每个子 agent 运行时会临时设置 `MINI_OPENCLAW_TODO_PATH=.mini-openclaw/subagents/<parent-run>/<role>/tasks.json`，因此角色之间的 TODO 状态互不覆盖。子 agent trace 写入 `traces/subagents/<parent-trace-stem>.<role>.jsonl`。带 `--image` 时，只有 Multimodal Agent 收到 image block 并使用视觉后端；Research、Engineering、Synthesis 和 Reviewer 继续使用文本后端。
 
 主 Agent 的调度方案会写入主 trace 的 `orchestration` 事件。启用子 agent 时，所有子 agent 输出会被拼成 `## Main Agent`、`## Multimodal Agent`、`## Research Agent`、`## Engineering Agent` 等证据块，再交给 Synthesis 生成最终回答；不启用子 agent 时，主 Agent 使用完整工具集直接完成任务。Reviewer 审查时会优先收到从各子 agent trace 中抽取的工具调用记录（工具名、参数、成功状态和截断 observation），再收到子 agent 输出文本，用于核对关键结论是否有执行证据。如果 Reviewer 返回“需修订”，Synthesis 会带着初版答案、Reviewer 意见和原始证据自动重写一次，要求保留原有分析深度，只做必要修正；随后再做复审。Reviewer 的初审、复审、证据摘要和是否触发修订只写入 trace，不打印到用户最终答案中。
 

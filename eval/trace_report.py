@@ -30,6 +30,25 @@ def load_records(path: str | Path) -> list[dict[str, Any]]:
     return records
 
 
+def _child_trace_paths(path: Path) -> list[Path]:
+    directory = path.parent / "subagents"
+    if not directory.exists():
+        return []
+    return sorted(child for child in directory.glob(f"{path.stem}.*.jsonl") if child.is_file())
+
+
+def _trace_paths(path: str | Path, include_children: bool = False) -> list[Path]:
+    trace_path = Path(path)
+    return [trace_path] + (_child_trace_paths(trace_path) if include_children else [])
+
+
+def _load_trace_records(path: str | Path, include_children: bool = False) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for item in _trace_paths(path, include_children):
+        records.extend(load_records(item))
+    return records
+
+
 def spans_from_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     starts = {str(item.get("span_id")): item for item in records if item.get("event") == "span_start"}
     spans: list[dict[str, Any]] = []
@@ -144,8 +163,8 @@ def _wall_duration_ms(records: list[dict[str, Any]], spans: list[dict[str, Any]]
     return round(sum(float(span.get("duration_ms", 0) or 0) for span in spans), 2)
 
 
-def summarize(path: str | Path) -> dict[str, Any]:
-    records = load_records(path)
+def summarize(path: str | Path, include_children: bool = False) -> dict[str, Any]:
+    records = _load_trace_records(path, include_children)
     raw_spans = spans_from_records(records) or _legacy_spans(records)
     spans, pricing = enrich_spans(raw_spans)
     llm = [span for span in spans if span.get("kind") == "llm"]
@@ -164,6 +183,7 @@ def summarize(path: str | Path) -> dict[str, Any]:
     matching_pairs = sum(1 for left, right in zip(known_prefixes, known_prefixes[1:]) if left == right)
     return {
         "events": len(records),
+        "trace_files": len(_trace_paths(path, include_children)),
         "spans": len(spans),
         "steps": len(llm),
         "tool_calls": len(tools),
