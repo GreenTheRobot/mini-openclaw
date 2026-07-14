@@ -14,6 +14,8 @@ def test_permission_matrix(tmp_path: Path):
     assert check("read", {"path": "README.md"}, tmp_path).verdict == "allow"
     assert check("read", {"path": "../secret.txt"}, tmp_path).verdict == "deny"
     assert check("task_list", {"action": "list"}, tmp_path).verdict == "allow"
+    assert check("todo_write", {"items": ["A"]}, tmp_path).verdict == "allow"
+    assert check("update_todo", {"id": 1, "status": "completed"}, tmp_path).verdict == "allow"
     assert check("experiment_start", {"run_id": "x"}, tmp_path).verdict == "confirm"
     assert check("remember", {"note": "x"}, tmp_path).verdict == "confirm"
 

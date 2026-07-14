@@ -1,4 +1,4 @@
-"""轻量 Planner：判断任务复杂度并要求使用显式 task_list。"""
+"""轻量 Planner：判断任务复杂度并要求使用显式 TODO。"""
 from __future__ import annotations
 
 import re
@@ -20,6 +20,6 @@ def planning_guidance(task: str) -> str:
         return ""
     return (
         "# 本次任务规划要求\n"
-        "这是复杂任务。执行任何写入或实验前，先调用 task_list 创建按依赖排序的待办；"
-        "每次只标记一个 in_progress，完成后写入可验证结果，失败时记录原因并更新后续计划。"
+        "这是复杂任务。执行任何写入或实验前，先调用 todo_write 创建按依赖排序的 TODO；"
+        "每次只用 update_todo 标记一个 in_progress，完成后标记 completed，失败或卡住时标记 blocked 并调整后续计划。"
     )

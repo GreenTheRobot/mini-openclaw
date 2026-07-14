@@ -10,8 +10,8 @@ from typing import Any, Callable
 
 from backend.multimodal import image_block
 from agent.context import (
-    estimate_tokens, maybe_compact, repair_tool_protocol, truncate_observation,
-    validate_tool_protocol,
+    estimate_tokens, has_open_tasks, maybe_compact, repair_tool_protocol,
+    task_state_snapshot, truncate_observation, validate_tool_protocol,
 )
 from tools.base import ToolRegistry, ToolResult, normalize_tool_result
 from . import permissions
@@ -33,6 +33,7 @@ LITERATURE_REPORT_TERMS = ("严格匹配", "提交日期", "摘要", "解决问�
 REUSABLE_OBSERVATION_TOOLS = {"arxiv_search", "web_fetch", "web_search", "read", "grep", "glob"}
 RESEARCH_DISCOVERY_TOOLS = {"arxiv_search", "web_fetch", "web_search"}
 NETWORK_PROBE_HINTS = ("curl", "wget", "requests", "httpx", "urllib", "http://", "https://")
+TODO_TOOL_NAMES = {"task_list", "todo_write", "update_todo"}
 
 
 def _needs_research_report(user_task: str) -> bool:
@@ -307,6 +308,7 @@ class AgentLoop:
         research_answer_repairs = 0
         research_tool_calls = 0
         last_compaction_turn = -3
+        used_todo = any(message.get("role") == "tool" and message.get("name") in TODO_TOOL_NAMES for message in messages)
         if self.tracer:
             self.tracer.log_event("run_start", task=user_task, workdir=str(self.workdir))
 
@@ -349,6 +351,21 @@ class AgentLoop:
                 )
             if not tool_calls:
                 answer = str(assistant.get("content", "")).strip()
+                if used_todo and has_open_tasks(self.workdir):
+                    snapshot = task_state_snapshot(self.workdir)
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "你刚才准备给最终答复，但权威 TODO 仍显示有未完成项。\n\n"
+                            f"{snapshot}\n\n"
+                            "请继续执行未完成项；只有所有 TODO 项都不是 pending/in_progress 后，"
+                            "才能给最终完成答复。"
+                        ),
+                    })
+                    self._emit("final_blocked", reason="open_todo", turn=turn + 1)
+                    if self.tracer:
+                        self.tracer.log_event("final_blocked", reason="open_todo", turn=turn + 1)
+                    continue
                 if research_answer_repairs < 2 and _is_insufficient_research_answer(user_task, answer):
                     research_answer_repairs += 1
                     messages.append({
@@ -371,6 +388,8 @@ class AgentLoop:
                 call_name = str(call.get("name", ""))
                 if call_name in RESEARCH_DISCOVERY_TOOLS:
                     research_tool_calls += 1
+                if call_name in TODO_TOOL_NAMES:
+                    used_todo = True
                 arguments = call.get("arguments")
                 tool = self.registry.get(call_name)
                 success = False
@@ -477,7 +496,7 @@ class AgentLoop:
             tokens_before = estimate_tokens(messages)
             compacted = messages
             if turn - last_compaction_turn >= 3 or tokens_before > self.context_budget * 2:
-                compacted = maybe_compact(messages, self.backend, budget=self.context_budget)
+                compacted = maybe_compact(messages, self.backend, budget=self.context_budget, workdir=self.workdir)
             if compacted is not messages:
                 last_compaction_turn = turn
                 tokens_after = estimate_tokens(compacted)

@@ -13,4 +13,4 @@ def test_expert_demonstrations_cover_core_agent_behaviors():
     rendered = render_demonstrations()
     assert "glob" in rendered
     assert "old_not_found" in rendered
-    assert "task_list" in rendered
+    assert "todo_write" in rendered

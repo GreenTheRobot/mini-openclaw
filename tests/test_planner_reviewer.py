@@ -10,11 +10,14 @@ class Backend:
 def test_planner_only_triggers_for_complex_tasks():
     assert needs_plan("读取 README") is False
     assert needs_plan("分析代码，然后修改配置，运行实验，最后生成报告") is True
-    assert "task_list" in planning_guidance("分析代码，然后修改配置，运行实验，最后生成报告")
+    guidance = planning_guidance("分析代码，然后修改配置，运行实验，最后生成报告")
+    assert "todo_write" in guidance
+    assert "update_todo" in guidance
 
 
 def test_reviewer_is_separate_model_stage():
     assert review_answer(Backend(), "任务", "答案") == "审查结论：通过"
+
 
 def test_reviewer_receives_bounded_tool_evidence():
     class EvidenceBackend:

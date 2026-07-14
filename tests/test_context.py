@@ -1,3 +1,5 @@
+import json
+
 from agent.context import (
     estimate_tokens,
     maybe_compact,
@@ -81,6 +83,32 @@ def test_protocol_repair_removes_orphan_tool_message():
     repaired = repair_tool_protocol(broken)
     assert validate_tool_protocol(repaired) == []
     assert all(message.get("role") != "tool" for message in repaired)
+
+
+def test_compaction_adds_authoritative_todo_snapshot(tmp_path):
+    state_dir = tmp_path / ".mini-openclaw"
+    state_dir.mkdir()
+    (state_dir / "tasks.json").write_text(json.dumps({
+        "items": [
+            {"id": "smoke", "title": "冒烟测试", "status": "completed", "result": "ok"},
+            {"id": "notify", "title": "微信通知", "status": "pending", "result": ""},
+        ]
+    }, ensure_ascii=False), encoding="utf-8")
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "早期准备。" + "a" * 4000},
+        {"role": "assistant", "content": "已完成早期准备。" + "b" * 4000},
+        {"role": "user", "content": "做实验，最后微信通知。" + "x" * 5000},
+        {"role": "assistant", "content": "已读取配置。" + "y" * 3000},
+        {"role": "assistant", "content": "全部已经完成，包括微信通知。" + "z" * 3000},
+    ]
+
+    compacted = maybe_compact(messages, SummaryBackend(), budget=100, recent_turns=1, workdir=tmp_path)
+
+    assert "权威 TODO 快照" in compacted[1]["content"]
+    assert "notify: 微信通知 [pending]" in compacted[1]["content"]
+    assert "不能声称整体任务已经完成" in compacted[1]["content"]
+    assert "最终答复前必须核对" in compacted[1]["content"]
 
 
 def test_long_observation_keeps_head_tail_and_archive_location():

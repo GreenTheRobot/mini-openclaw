@@ -3,6 +3,7 @@ from pathlib import Path
 from agent.loop import AgentLoop
 from eval.tracer import Tracer, summarize
 from tools.base import Tool, ToolRegistry, ToolResult
+from tools.todo import todo_write_tool, update_todo_tool
 
 
 class SequenceBackend:
@@ -28,6 +29,7 @@ def test_loop_returns_validation_error_as_observation_and_recovers(tmp_path: Pat
     assert summary["errors"] == 1
     assert "estimated_cost_usd" in summary
 
+
 def test_loop_preserves_multi_turn_conversation(tmp_path: Path):
     seen_messages = []
 
@@ -43,6 +45,7 @@ def test_loop_preserves_multi_turn_conversation(tmp_path: Path):
     assert any(message.get("content") == "第一轮" for message in seen_messages[-1])
     loop.reset()
     assert loop.run("新会话") == "已看到1个用户回合"
+
 
 def test_loop_treats_semantic_tool_failure_as_recoverable_observation(tmp_path: Path):
     seen_messages = []
@@ -65,6 +68,7 @@ def test_loop_treats_semantic_tool_failure_as_recoverable_observation(tmp_path: 
     assert loop.run("执行任务") == "检测到失败后已改用替代方案。"
     assert summarize(trace)["errors"] == 1
     assert any("[TOOL_ERROR]" in message.get("content", "") for message in seen_messages[-1])
+
 
 def test_session_domain_grant_avoids_repeated_confirmation(tmp_path: Path):
     from agent.permissions import ConfirmationResponse, PermissionManager
@@ -99,6 +103,7 @@ def test_session_domain_grant_avoids_repeated_confirmation(tmp_path: Path):
     assert loop.run("second") == "second done"
     assert confirmations == [("web_fetch", "https://arxiv.org/a")]
 
+
 def test_loop_normalizes_missing_tool_call_ids(tmp_path: Path):
     from agent.context import validate_tool_protocol
 
@@ -126,6 +131,7 @@ def test_loop_normalizes_missing_tool_call_ids(tmp_path: Path):
     assistant_call = next(message for message in seen[-1] if message.get("tool_calls"))
     tool_result = next(message for message in seen[-1] if message.get("role") == "tool")
     assert assistant_call["tool_calls"][0]["id"] == tool_result["tool_call_id"]
+
 
 def test_repeated_multi_tool_compaction_remains_protocol_valid(tmp_path: Path):
     import json
@@ -281,6 +287,44 @@ def test_loop_rejects_status_only_research_answer(tmp_path: Path):
     assert "insufficient_research_answer" in trace.read_text(encoding="utf-8")
 
 
+def test_loop_blocks_final_answer_while_todo_has_open_items(tmp_path: Path):
+    seen_messages = []
+
+    class PrematureFinalBackend:
+        def __init__(self):
+            self.turn = 0
+
+        def chat(self, messages, tools=None):
+            seen_messages.append([dict(message) for message in messages])
+            self.turn += 1
+            if self.turn == 1:
+                return {"content": "", "tool_calls": [{
+                    "id": "create-tasks",
+                    "name": "todo_write",
+                    "arguments": {"items": ["微信通知"]},
+                }]}
+            if self.turn == 2:
+                return {"content": "实验和微信通知都已完成。", "tool_calls": []}
+            if self.turn == 3:
+                return {"content": "", "tool_calls": [{
+                    "id": "finish-notify",
+                    "name": "update_todo",
+                    "arguments": {"id": 1, "status": "completed"},
+                }]}
+            return {"content": "已完成全部任务。", "tool_calls": []}
+
+    registry = ToolRegistry()
+    registry.register(todo_write_tool)
+    registry.register(update_todo_tool)
+    trace = tmp_path / "blocked-final.jsonl"
+    loop = AgentLoop(PrematureFinalBackend(), registry, "system", workdir=tmp_path, auto_approve=True, tracer=Tracer(trace))
+
+    assert loop.run("做实验，最后微信通知。") == "已完成全部任务。"
+    assert loop.last_run_status == "success"
+    assert any("权威 TODO 仍显示有未完成项" in str(message.get("content", "")) for message in seen_messages[2])
+    assert "final_blocked" in trace.read_text(encoding="utf-8")
+
+
 def test_loop_reuses_successful_identical_fetch_observation(tmp_path: Path):
     seen_messages = []
     calls = {"count": 0}
@@ -373,6 +417,7 @@ def test_loop_summarizes_evidence_after_max_turns(tmp_path: Path):
     assert backend.calls[-1] == []
     assert loop.last_run_status == "partial"
     assert "max_turns_summarized" in trace.read_text(encoding="utf-8")
+
 
 def test_literature_search_budget_forces_structured_report_and_rewrite(tmp_path: Path):
     class LiteratureBackend:

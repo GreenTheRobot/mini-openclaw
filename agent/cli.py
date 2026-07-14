@@ -426,7 +426,8 @@ def main(argv: list[str] | None = None) -> int:
             backend = FakeBackend()
 
     if args.ablation == "no-planning":
-        registry.remove("task_list")
+        registry.remove("todo_write")
+        registry.remove("update_todo")
     system = "你是一个命令行助手。完成用户任务。" if args.ablation == "minimal-prompt" else SYSTEM_PROMPT
     if args.ablation != "minimal-prompt":
         from prompt.demonstrations import render_demonstrations

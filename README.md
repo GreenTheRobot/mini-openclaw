@@ -63,7 +63,7 @@ mini-OpenClaw 是一个 Claude Code 式的命令行 Agent：
 | `backend/` | DeepSeek API 客户端（已给`client.py`，配 key 即用）；Day2 连通后端 + 首个工具 schema | Day1–2          |
 | `prompt/`  | render_prompt(messages, tools) 对话模板渲染 + parse_tool_calls                         | Day3             |
 | `agent/`   | 系统提示词（Day2 起草，Day5 完善）、ReAct 主循环、上下文管理                           | Day2, Day5, Day7 |
-| `tools/`   | read/write/bash → edit/grep/glob → web_fetch/task_list                               | Day5, Day6, Day7 |
+| `tools/`   | read/write/bash → edit/grep/glob → web_fetch/todo_write/update_todo                  | Day5, Day6, Day7 |
 | `mcp/`     | 最小 MCP 客户端（stdio + JSON-RPC）                                                    | Day8             |
 | `skills/`  | Skills 加载器 + 你领域的 Skill                                                         | Day9             |
 | `eval/`    | 任务集 + 指标评测 + 消融                                                               | Day7, Day10      |

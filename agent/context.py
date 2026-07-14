@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
+
+
+TASK_STATE_PATH = Path(".mini-openclaw/tasks.json")
+OPEN_TASK_STATUSES = {"pending", "in_progress"}
 
 
 def estimate_tokens(messages: list[dict[str, Any]]) -> int:
@@ -129,6 +134,56 @@ def repair_tool_protocol(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
     return repaired
 
 
+def _load_task_items(workdir: str | Path | None = None) -> list[dict[str, Any]]:
+    if workdir is None:
+        return []
+    path = Path(workdir) / TASK_STATE_PATH
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    items = data.get("items")
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def has_open_tasks(workdir: str | Path | None = None) -> bool:
+    return any(str(item.get("status", "")) in OPEN_TASK_STATUSES for item in _load_task_items(workdir))
+
+
+def task_state_snapshot(workdir: str | Path | None = None) -> str:
+    items = _load_task_items(workdir)
+    if not items:
+        return ""
+
+    lines = [
+        "## 权威 TODO 快照",
+        "来源：.mini-openclaw/tasks.json。这个状态优先于模型生成的压缩摘要。",
+    ]
+    open_ids: list[str] = []
+    for item in items:
+        task_id = str(item.get("id", "")).strip() or "(no id)"
+        title = str(item.get("title", "")).strip() or "(no title)"
+        status = str(item.get("status", "")).strip() or "(no status)"
+        result = str(item.get("result", "")).strip()
+        if status in OPEN_TASK_STATUSES:
+            open_ids.append(task_id)
+        line = f"- {task_id}: {title} [{status}]"
+        if result:
+            line += f" result={result}"
+        lines.append(line)
+
+    if open_ids:
+        lines.append(f"未完成任务 id：{', '.join(open_ids)}")
+        lines.append("只要存在 pending 或 in_progress 项，就不能声称整体任务已经完成。")
+    else:
+        lines.append("没有 pending 或 in_progress 的 TODO 项。")
+    return "\n".join(lines)
+
+
 def _atomic_units(messages: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     """Group one assistant tool call with all immediately following tool results."""
     units: list[list[dict[str, Any]]] = []
@@ -176,6 +231,7 @@ def maybe_compact(
     backend: Any,
     budget: int = 20000,
     recent_turns: int = 2,
+    workdir: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     if len(messages) <= 3:
         return messages
@@ -209,10 +265,15 @@ def maybe_compact(
         return messages
     if not summary:
         return messages
-    memo = {
-        "role": "user",
-        "content": "# 历史压缩备忘（必须继续遵循）\n" + summary,
-    }
+
+    snapshot = task_state_snapshot(workdir)
+    memo_content = "# 历史压缩备忘（必须继续遵循）\n" + summary
+    if snapshot:
+        memo_content += (
+            "\n\n" + snapshot
+            + "\n最终答复前必须核对权威 TODO 快照；如果仍有 pending 或 in_progress 项，请继续执行而不是宣布完成。"
+        )
+    memo = {"role": "user", "content": memo_content}
     compacted = [system, memo, *recent]
     if validate_tool_protocol(compacted):
         return messages

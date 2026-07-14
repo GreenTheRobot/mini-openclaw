@@ -40,11 +40,11 @@ EXPERT_DEMONSTRATIONS: list[dict[str, Any]] = [
         "name": "plan_complex_research_task",
         "user": "分析代码、改配置、跑实验并写报告。",
         "trajectory": [
-            ("tool", "task_list", {"action": "create", "items": [
-                {"id": "inspect", "title": "定位代码与配置"},
-                {"id": "edit", "title": "最小修改"},
-                {"id": "smoke", "title": "冒烟测试"},
-                {"id": "report", "title": "实验与报告"},
+            ("tool", "todo_write", {"items": [
+                "定位代码与配置",
+                "最小修改",
+                "冒烟测试",
+                "实验与报告",
             ]}),
             ("assistant", "按依赖顺序一次推进一个任务，失败时记录原因并调整。"),
         ],
