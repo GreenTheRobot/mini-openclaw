@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from agent.context import validate_tool_protocol
+from agent.sanitize import clean_text, sanitize_for_json
 
 
 class DeepSeekAPIError(RuntimeError):
@@ -45,6 +46,7 @@ class DeepSeekBackend:
         tools: list[dict] | None = None,
         temperature: float = 0.0,
     ) -> dict[str, Any]:
+        messages = sanitize_for_json(messages)
         protocol_errors = validate_tool_protocol(messages)
         if protocol_errors:
             raise ValueError("发送前消息协议校验失败：" + "; ".join(protocol_errors))
@@ -54,7 +56,7 @@ class DeepSeekBackend:
             "temperature": temperature,
         }
         if tools:
-            payload["tools"] = tools
+            payload["tools"] = sanitize_for_json(tools)
             payload["tool_choice"] = "auto"
 
         response = self._client.post(
@@ -72,7 +74,7 @@ class DeepSeekBackend:
             raise DeepSeekAPIError(
                 response.status_code,
                 "响应缺少 choices[0].message",
-                json.dumps(data, ensure_ascii=False)[:2000],
+                json.dumps(sanitize_for_json(data), ensure_ascii=False)[:2000],
             ) from exc
         result["usage"] = data.get("usage", {})
         result["model"] = data.get("model", self.model)
@@ -88,9 +90,9 @@ class DeepSeekBackend:
                     message = error.get("message") or error.get("type")
                     if message:
                         return str(message)
-            return json.dumps(data, ensure_ascii=False)
+            return json.dumps(sanitize_for_json(data), ensure_ascii=False)
         except Exception:
-            return response.text[:2000]
+            return clean_text(response.text[:2000])
 
     def _to_openai_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         output = []
@@ -99,13 +101,13 @@ class DeepSeekBackend:
             if role == "tool":
                 output.append({
                     "role": "tool",
-                    "content": str(message.get("content", "")),
+                    "content": clean_text(message.get("content", "")),
                     "tool_call_id": str(message.get("tool_call_id", "")),
                 })
             elif role == "assistant" and message.get("tool_calls"):
                 output.append({
                     "role": "assistant",
-                    "content": message.get("content") or None,
+                    "content": clean_text(message.get("content") or "") or None,
                     "tool_calls": self._to_openai_tool_calls(message["tool_calls"]),
                 })
             else:
@@ -118,11 +120,11 @@ class DeepSeekBackend:
     @staticmethod
     def _to_openai_content(content: Any) -> Any:
         if not isinstance(content, list):
-            return content
+            return clean_text(content)
         output = []
         for block in content:
             if block.get("type") == "text":
-                output.append({"type": "text", "text": block.get("text", "")})
+                output.append({"type": "text", "text": clean_text(block.get("text", ""))})
             elif block.get("type") == "image":
                 source = block.get("source", {})
                 media_type = source.get("media_type", "image/png")
@@ -145,7 +147,7 @@ class DeepSeekBackend:
                 "type": "function",
                 "function": {
                     "name": call["name"],
-                    "arguments": json.dumps(call.get("arguments", {}), ensure_ascii=False),
+                    "arguments": json.dumps(sanitize_for_json(call.get("arguments", {})), ensure_ascii=False),
                 },
             })
         return output
@@ -160,12 +162,12 @@ class DeepSeekBackend:
             except json.JSONDecodeError:
                 arguments = {}
             tool_calls.append({
-                "id": tool_call.get("id"),
-                "name": function.get("name"),
-                "arguments": arguments,
+                "id": clean_text(tool_call.get("id")),
+                "name": clean_text(function.get("name")),
+                "arguments": sanitize_for_json(arguments),
             })
         return {
             "role": "assistant",
-            "content": message.get("content") or "",
+            "content": clean_text(message.get("content") or ""),
             "tool_calls": tool_calls,
         }

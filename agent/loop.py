@@ -13,6 +13,7 @@ from agent.context import (
     estimate_tokens, has_open_tasks, maybe_compact, repair_tool_protocol,
     task_state_snapshot, truncate_observation, validate_tool_protocol,
 )
+from agent.sanitize import clean_text, sanitize_for_json
 from tools.base import ToolRegistry, ToolResult, normalize_tool_result
 from . import permissions
 
@@ -155,6 +156,7 @@ class AgentLoop:
             os.chdir(old_cwd)
 
     def _observation_content(self, step: int, tool: str, text: str) -> str:
+        text = clean_text(text)
         if len(text) <= 4000:
             return text
         directory = self.workdir / ".mini-openclaw" / "observations"
@@ -290,6 +292,7 @@ class AgentLoop:
             heading=f"连续 {consecutive_errors} 次工具失败，停止探索并交付结果",
         )
     def run(self, user_task: str, image_paths: list[str] | None = None) -> str:
+        user_task = clean_text(user_task)
         self.permission_manager.begin_task()
         self.last_run_status = "running"
         user_content: Any = user_task
@@ -328,7 +331,7 @@ class AgentLoop:
             tools = self.registry.schemas() if getattr(self.backend, "supports_tools", True) else []
             started = time.perf_counter()
             self._emit("model_start", turn=turn + 1)
-            assistant = self.backend.chat(messages, tools=tools)
+            assistant = sanitize_for_json(self.backend.chat(messages, tools=tools))
             self._emit("model_end", turn=turn + 1)
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             normalized_calls = []

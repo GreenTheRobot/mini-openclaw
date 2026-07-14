@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from agent.sanitize import sanitize_for_json
+
 
 class Tracer:
     def __init__(self, path: str | Path, run_id: str | None = None):
@@ -17,13 +19,13 @@ class Tracer:
         self.run_id = run_id or uuid4().hex
 
     def log_event(self, event: str, **payload: Any) -> None:
-        record = {
+        record = sanitize_for_json({
             "ts": round(time.time(), 3),
             "run_id": self.run_id,
             "event": event,
             **payload,
-        }
-        with self.path.open("a", encoding="utf-8") as file:
+        })
+        with self.path.open("a", encoding="utf-8", errors="backslashreplace") as file:
             file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def log_step(self, step: int, tool_calls: list, prompt_tokens: int,

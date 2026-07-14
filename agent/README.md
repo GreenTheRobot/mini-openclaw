@@ -33,3 +33,9 @@ recent = 最近的完整消息与 assistant/tool 原子组
 ## 科研回答与 Reviewer
 
 网页、项目、论文、GitHub 和方法调研任务会检查最终答复是否包含来源链接、方法说明和实际结论；状态汇报、空任务清单或过短回答会被要求重写。Reviewer 是独立模型审查阶段，不调用工具、不新增事实，并接收受限长度的工具证据；默认按需使用 `/audit`，单次命令可使用 `--audit`。
+
+## Unicode 与 Trace 鲁棒性
+
+模型响应、PDF/网页解析、终端输入和外部 API 错误体都可能带入 lone surrogate，例如 `\udce5`。这类字符不是合法 Unicode 标量，直接写入 UTF-8 trace、打印到终端，或随历史消息再次发给 DeepSeek 时会触发 `surrogates not allowed`。`sanitize.py` 提供统一清理函数，把这类字符替换为 `�`，并递归处理列表和字典。
+
+当前清理边界包括：`cli.py` 的用户输入和最终输出，`loop.py` 的用户任务、模型返回和长 observation 归档，`backend/client.py` 发请求前的消息与工具 schema、收到的模型内容和错误体，以及 `eval/tracer.py` 写 JSONL 前的 payload。这样即便某一轮返回了非法 surrogate，也不会污染 `agent.messages`，后续 `/history`、Trace 写入和下一轮模型请求仍能继续运行。

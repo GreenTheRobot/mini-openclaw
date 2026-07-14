@@ -19,6 +19,7 @@ from agent.permissions import (
     PermissionManager,
 )
 from agent.prompts import SYSTEM_PROMPT
+from agent.sanitize import clean_text
 from agent.ui import EventRenderer
 from tools.base import ToolRegistry, build_default_registry
 
@@ -43,6 +44,7 @@ _console = Console(markup=False) if Console else None
 
 
 def _print(text: str = "") -> None:
+    text = clean_text(text)
     if _console:
         _console.print(text)
     else:
@@ -50,6 +52,7 @@ def _print(text: str = "") -> None:
 
 
 def _print_markdown(text: str) -> None:
+    text = clean_text(text)
     if _console and Markdown:
         _console.print(Markdown(_unwrap_markdown_fence(text)))
     else:
@@ -244,7 +247,7 @@ def _interactive(
 
     while True:
         try:
-            task = _input("mini-openclaw> ").strip()
+            task = clean_text(_input("mini-openclaw> ").strip())
         except EOFError:
             _print("\n会话结束。")
             return 0
