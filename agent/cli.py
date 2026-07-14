@@ -204,7 +204,7 @@ def _show_help() -> None:
 - `/audit`：按需审查上一轮回答
 - `/tasks`：查看任务清单
 - `/memory`：查看项目长期记忆
-- `/trace`：汇总当前会话 Trace
+- `/trace`：汇总当前会话 Trace；`/trace replay` 回放；`/trace cost` 成本；`/trace diagnose` 诊断；`/trace html [输出路径]` 生成 HTML
 - `/status`：查看后端、权限、显示模式和会话状态
 - `/history`：查看当前对话消息摘要
 - `/clear` 或 `/new`：清空对话上下文和临时授权
@@ -340,8 +340,21 @@ def _interactive(
             _print(Memory("MEMORY.md").recall() or "暂无长期记忆。")
             continue
         if command == "/trace":
-            from eval.tracer import summarize
-            _print(json.dumps(summarize(trace_path), ensure_ascii=False, indent=2))
+            from eval.trace_report import cost_report, diagnose, render_terminal, summarize, write_html
+            trace_action, _, trace_output = argument.strip().partition(" ")
+            if trace_action in {"", "summary"}:
+                _print(json.dumps(summarize(trace_path), ensure_ascii=False, indent=2))
+            elif trace_action == "cost":
+                _print(json.dumps(cost_report(trace_path), ensure_ascii=False, indent=2))
+            elif trace_action == "diagnose":
+                _print(json.dumps(diagnose(trace_path), ensure_ascii=False, indent=2))
+            elif trace_action == "replay":
+                _print(render_terminal(trace_path, details=True))
+            elif trace_action == "html":
+                output = Path(trace_output.strip()) if trace_output.strip() else trace_path.with_suffix(".html")
+                _print(f"Trace HTML 已生成：{write_html(trace_path, output)}")
+            else:
+                _print("用法：/trace [summary|cost|diagnose|replay|html [输出路径]]")
             continue
         if command == "/history":
             for index, message in enumerate(agent.messages):
@@ -469,7 +482,16 @@ def main(argv: list[str] | None = None) -> int:
         system += "\n\n# 可用 Skills（需要时按流程执行）\n" + skills_catalog(skills)
     from eval.tracer import Tracer
     trace_path = Path(args.trace) if args.trace else Path("traces") / time.strftime("session-%Y%m%d-%H%M%S.jsonl")
-    tracer = Tracer(trace_path)
+    trace_metadata: dict[str, Any] = {}
+    raw_trace_context = os.environ.get("MINI_OPENCLAW_TRACE_CONTEXT", "").strip()
+    if raw_trace_context:
+        try:
+            parsed = json.loads(raw_trace_context)
+            if isinstance(parsed, dict):
+                trace_metadata = parsed
+        except json.JSONDecodeError:
+            _print("[提示] 忽略格式错误的 MINI_OPENCLAW_TRACE_CONTEXT。")
+    tracer = Tracer(trace_path, metadata=trace_metadata)
     renderer = EventRenderer(_print, verbose=args.verbose)
     manager = PermissionManager(args.permission_mode)
     agent = AgentLoop(

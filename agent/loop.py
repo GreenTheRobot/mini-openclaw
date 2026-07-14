@@ -5,6 +5,7 @@ import json
 import os
 import time
 from collections import Counter
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable
 
@@ -201,10 +202,28 @@ class AgentLoop:
             return
         if not self.messages:
             self.messages = [{"role": "system", "content": self.system_prompt}]
-        # 保持唯一 system 消息位于会话开头，兼容 OpenAI/DeepSeek 消息协议。
-        self.messages[0]["content"] = str(self.messages[0].get("content", "")).rstrip() + "\n\n" + content
+        # 首轮前可把稳定的项目上下文并入系统前缀；会话开始后不再
+        # 改写 system，避免让后续请求失去可缓存的稳定前缀。
+        if len(self.messages) == 1:
+            self.messages[0]["content"] = str(self.messages[0].get("content", "")).rstrip() + "\n\n" + content
+        else:
+            self.messages.append({
+                "role": "user",
+                "content": "[项目补充上下文：以下内容由本地配置/Skill 提供，仍受系统约束。]\n" + content,
+            })
         self.loaded_contexts.add(key)
         self._emit("context_loaded", key=key)
+
+    @staticmethod
+    def _prefix_metrics(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        """Fingerprint the stable system prefix without storing its raw content."""
+        system = messages[0] if messages and messages[0].get("role") == "system" else {}
+        content = str(system.get("content", ""))
+        return {
+            "stable_prefix_digest": sha256(content.encode("utf-8", errors="replace")).hexdigest()[:16],
+            "stable_prefix_chars": len(content),
+            "stable_prefix_messages": 1 if content else 0,
+        }
     def _run_tool(self, tool: Any, arguments: dict[str, Any]) -> ToolResult:
         old_cwd = os.getcwd()
         os.chdir(self.workdir)
@@ -280,20 +299,38 @@ class AgentLoop:
             current_turn = fallback_turn + attempt
             started = time.perf_counter()
             self._emit("model_start", turn=current_turn, mode=reason)
+            llm_span = self.tracer.start_span(
+                "llm",
+                "synthesize",
+                input_value=f"messages={len(messages)} tools=0",
+                attributes={
+                    "turn": current_turn,
+                    "mode": reason,
+                    "message_count": len(messages),
+                    "context_tokens_estimate": estimate_tokens(messages),
+                    **self._prefix_metrics(messages),
+                },
+            ) if self.tracer else None
             try:
                 assistant = self.backend.chat(messages, tools=[])
             except Exception as exc:
+                if llm_span:
+                    llm_span.finish(status="error", error=repr(exc))
                 self.last_run_status = "failed"
                 if self.tracer:
-                    self.tracer.log_event(
-                        "run_end", status="failed", reason=f"{reason}_backend_error", error=str(exc),
-                    )
+                    self.tracer.finish_run(status="failed", reason=f"{reason}_backend_error", error=str(exc))
                 return f"[工具探索已停止，但证据总结失败：{exc}]"
             self._emit("model_end", turn=current_turn, mode=reason)
             content = str(assistant.get("content", "")).strip()
             messages.append({"role": "assistant", "content": content, "tool_calls": []})
             if self.tracer:
                 usage = assistant.get("usage") or {}
+                if llm_span:
+                    llm_span.finish(
+                        output={"content": content, "tool_calls": []},
+                        usage=usage,
+                        attributes={"model": assistant.get("model", type(self.backend).__name__)},
+                    )
                 self.tracer.log_step(
                     current_turn, [],
                     usage.get("prompt_tokens", estimate_tokens(messages[:-1])),
@@ -312,8 +349,8 @@ class AgentLoop:
         self.messages = messages
         self.last_run_status = "partial" if content else "failed"
         if self.tracer:
-            self.tracer.log_event(
-                "run_end", status=self.last_run_status, reason=reason,
+            self.tracer.finish_run(
+                status=self.last_run_status, reason=reason,
                 turns=fallback_turn + attempts_used - 1,
             )
         return content or "[工具探索已停止，模型未能生成部分报告]"
@@ -372,7 +409,12 @@ class AgentLoop:
         last_compaction_turn = -3
         used_todo = any(message.get("role") == "tool" and message.get("name") in TODO_TOOL_NAMES for message in messages)
         if self.tracer:
-            self.tracer.log_event("run_start", task=user_task, workdir=str(self.workdir))
+            self.tracer.start_run(
+                task=user_task,
+                workdir=self.workdir,
+                max_turns=self.max_turns,
+                backend=type(self.backend).__name__,
+            )
 
         for turn in range(self.max_turns):
             protocol_errors = validate_tool_protocol(messages)
@@ -390,7 +432,26 @@ class AgentLoop:
             tools = self.registry.schemas() if getattr(self.backend, "supports_tools", True) else []
             started = time.perf_counter()
             self._emit("model_start", turn=turn + 1)
-            assistant = sanitize_for_json(self.backend.chat(messages, tools=tools))
+            llm_span = self.tracer.start_span(
+                "llm",
+                "decide",
+                input_value=f"messages={len(messages)} tools={len(tools)}",
+                attributes={
+                    "turn": turn + 1,
+                    "message_count": len(messages),
+                    "context_tokens_estimate": estimate_tokens(messages),
+                    "tool_schema_count": len(tools),
+                    **self._prefix_metrics(messages),
+                },
+            ) if self.tracer else None
+            try:
+                assistant = sanitize_for_json(self.backend.chat(messages, tools=tools))
+            except Exception as exc:
+                if llm_span:
+                    llm_span.finish(status="error", error=repr(exc))
+                if self.tracer:
+                    self.tracer.finish_run(status="failed", reason="backend_error", error=repr(exc), turns=turn + 1)
+                raise
             self._emit("model_end", turn=turn + 1)
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             normalized_calls = []
@@ -406,6 +467,12 @@ class AgentLoop:
             })
             if self.tracer:
                 usage = assistant.get("usage") or {}
+                if llm_span:
+                    llm_span.finish(
+                        output={"content": assistant.get("content", ""), "tool_calls": tool_calls},
+                        usage=usage,
+                        attributes={"model": assistant.get("model", type(self.backend).__name__)},
+                    )
                 self.tracer.log_step(
                     turn + 1, tool_calls, usage.get("prompt_tokens", estimate_tokens(messages[:-1])),
                     usage.get("completion_tokens", len(str(assistant.get("content", ""))) // 4),
@@ -444,7 +511,7 @@ class AgentLoop:
                 self._emit("answer", content=answer, turn=turn + 1)
                 self.last_run_status = "success" if answer else "failed"
                 if self.tracer:
-                    self.tracer.log_event("run_end", status=self.last_run_status, turns=turn + 1)
+                    self.tracer.finish_run(status=self.last_run_status, turns=turn + 1)
                 return answer or "[模型未返回内容，任务失败]"
 
             for call in tool_calls:
@@ -458,6 +525,12 @@ class AgentLoop:
                 success = False
                 error_category = "unknown_error"
                 tool_started = time.perf_counter()
+                tool_span = self.tracer.start_span(
+                    "tool",
+                    call_name,
+                    input_value=arguments,
+                    attributes={"turn": turn + 1, "tool_call_id": call.get("id") or call_name},
+                ) if self.tracer else None
                 self._emit("tool_start", name=call_name, arguments=arguments)
                 if tool is None:
                     obs = self._error(call_name, "unknown_tool", "工具未注册")
@@ -539,11 +612,18 @@ class AgentLoop:
                 self._emit("tool_result", name=call_name, success=success, observation=str(obs))
                 if self.tracer:
                     self.tracer.log_event(
-                        "tool_result", step=turn + 1, tool=call_name, arguments=arguments,
+                        "tool_result", step=turn + 1, tool=call_name, tool_call_id=call.get("id") or call_name,
+                        arguments=arguments,
                         success=success,
                         duration_ms=round((time.perf_counter() - tool_started) * 1000, 2),
                         observation=str(obs)[:1000],
                     )
+                    if tool_span:
+                        tool_span.finish(
+                            status="ok" if success else "error",
+                            output=obs,
+                            attributes={"category": error_category},
+                        )
             # 等本批 assistant 声明的全部 tool_calls 都回填结果后再停止探索，
             # 避免把不完整的 assistant/tool 协议保留到跨轮会话历史中。
             if consecutive_errors >= self.max_consecutive_errors:

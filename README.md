@@ -143,6 +143,7 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 - [X] 完成多模态与文献解析依赖维护：`requirements.txt` 增加 `pillow`、`rich`、`markitdown[all]`、`marker-pdf`。
 - [X] 完成 PDF 解析运行链路：优先评估 GPU 使用 Marker，GPU 不满足时降级 MarkItDown，并用 PyMuPDF 保存论文图片和 `image_manifest.json`。
 - [X] 完成相对路径定时科研任务：`schedule_task` 管理任务，独立运行保存 TODO、stdout、stderr 和 Trace；可由 `python -m agent.scheduler run-due` 配合系统定时器触发。
+- [X] 完成结构化 Trace：以带父子关联的 LLM/工具 span 记录运行，支持终端/Markdown/HTML 渲染、只读 replay 与 simulate、成本/慢调用统计和诊断建议。
 
 ## 已实现功能清单
 
@@ -205,10 +206,53 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 
 - 工具调用评测：支持 JSON 合法率、工具选择正确率、参数正确率等指标。
 - 端到端任务样例：包含读配置、列目录、查 DOI、生成 hello 脚本、TODO 报告等任务结构。
-- 轨迹记录与回放：支持将每步工具调用、token 统计和备注写入 JSONL 后回放。
+- 轨迹记录与回放：每次运行记录根 Agent span、LLM span 和工具 span（含父子关联、耗时、token、工具调用 ID 与已脱敏摘要）；支持旧版 JSONL 兼容读取。
+- Trace CLI：`python -m eval.trace_cli {summary,cost,replay,render,simulate,diagnose} traces/<name>.jsonl`；交互 CLI 支持 `/trace`、`/trace replay`、`/trace cost`、`/trace diagnose`、`/trace html`。
+- 安全 replay：`replay` 和 `simulate` 只消费已保存的 Trace，不会再次调用模型或执行工具；HTML 渲染会转义 Trace 内容。
+- 缓存可观测性：LLM span 记录稳定 system 前缀摘要；Skill 上下文会在首轮前写入 system，运行中新增上下文改写为用户消息，避免破坏可复用前缀。
 - 消融样例：提供有/无 system prompt 的成功率对比样例。
 - LLM-as-judge：提供基于 rubric 的回答评分雏形。
 - 红队记录：`security/redteam_results.csv` 保存真实 CLI 运行的 case、指令、自动确认答案、returncode、PTY 状态和完整输出。
+
+#### Trace 验证：六种命令
+
+先运行一次任务生成真实轨迹；`traces/` 下的路径均相对于项目根目录。没有配置真实模型 Key 时也可使用 FakeBackend 验证 Trace 链路，但应额外用真实模型完成一次多轮工具调用验证。
+
+```bash
+# 生成一条 Trace（建议使用会触发工具调用的真实任务）
+python -m agent.cli "分析 README 中的 Trace 能力" --trace traces/trace-demo.jsonl
+```
+
+对生成的 `traces/trace-demo.jsonl` 依次运行以下六种命令：
+
+```bash
+# 1. 汇总：span 数、token、耗时、错误、最慢/最贵调用与前缀稳定性
+python -m eval.trace_cli summary traces/trace-demo.jsonl
+
+# 2. 成本：按 LLM span 列出输入/输出 token 与估算费用
+python -m eval.trace_cli cost traces/trace-demo.jsonl
+
+# 3. 回放：按时间顺序显示 LLM/工具/Agent span；--details 显示脱敏输入输出摘要
+python -m eval.trace_cli replay traces/trace-demo.jsonl --details
+
+# 4. 渲染：生成可在浏览器打开的静态 HTML 报告
+python -m eval.trace_cli render traces/trace-demo.jsonl --format html --output traces/trace-demo.html
+
+# 5. 模拟：只消费已保存的工具结果并检查调用配对；不会重跑模型或工具
+python -m eval.trace_cli simulate traces/trace-demo.jsonl
+
+# 6. 诊断：发现慢调用、失败、上下文增长、重复工具调用、协议修复和前缀不稳定
+python -m eval.trace_cli diagnose traces/trace-demo.jsonl
+```
+
+`cost` 只有在设置模型实际价格后才会输出估算金额，未设置时会显示“未计价”，而非误导性的零成本：
+
+```bash
+export OPENCLAW_INPUT_USD_PER_MILLION=0.27
+export OPENCLAW_OUTPUT_USD_PER_MILLION=1.10
+```
+
+多轮任务的 `summary.prefix_cache.adjacent_match_ratio` 应为 `1.0`，表示连续 LLM 调用的稳定 system 前缀未被中途改写；只有一轮 LLM 调用时该字段为 `null` 属于正常情况。定时科研任务则对其运行目录中的 `trace.jsonl` 使用同一组六种命令验证，根 span 会包含 `schedule_id` 和 `scheduled_run_id`。
 
 ## 里程碑
 

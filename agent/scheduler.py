@@ -241,6 +241,11 @@ def _execute(spec: dict[str, Any], root: Path) -> dict[str, Any]:
     environment["MINI_OPENCLAW_TODO_PATH"] = (
         run_dir / f"{run_id}.tasks.json"
     ).relative_to(workdir).as_posix()
+    environment["MINI_OPENCLAW_TRACE_CONTEXT"] = json.dumps({
+        "schedule_id": spec["id"],
+        "scheduled_run_id": run_id,
+        "schedule_workdir": str(spec["workdir"]),
+    }, ensure_ascii=False)
     started = datetime.now().astimezone()
     status = "completed"
     returncode = 0

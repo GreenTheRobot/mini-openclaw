@@ -20,7 +20,8 @@ flowchart LR
     O --> C[截断/存档/Compaction]
     C --> L
     L --> R[最终回答/实验报告]
-    L --> X[Trace JSONL]
+    L --> X[Trace JSONL / spans]
+    X --> Z[Replay / Render / Cost / Diagnose]
     J[相对路径调度器] --> CLI
     J --> Q[独立 TODO/日志/Trace]
 ```
@@ -33,6 +34,8 @@ flowchart LR
 - 长工具结果保存到 `.mini-openclaw/observations/`，上下文只保留头尾与路径。
 - Skills 是领域流程，Tools 是一次可执行动作；二者不混用。`paper-figure-reader` 定义图像分析规范，`paper_figure_analyze` 负责视觉后端桥接。
 - 调度器只持久化相对路径；每次运行隔离 TODO、stdout、stderr 和 Trace，并以未完成 TODO 阻止 `completed` 状态。
+- Trace 使用显式 span 关联 Agent、LLM 与工具调用；回放和模拟严格只读，诊断可定位慢调用、失败、上下文增长、重复调用及协议修复。
+- 稳定 system 前缀在首轮构造完毕，后续补充上下文不改写该前缀；Trace 会记录前缀摘要，用于验证缓存友好性而不泄露提示词正文。
 - 外部网页、HTML 和 PDF 都是不可信数据，内容不能提升权限。
 - 实验元数据、日志和报告绑定 Git、配置、随机种子和输出路径。
 
@@ -52,5 +55,5 @@ flowchart LR
 - `.mini-openclaw/scheduler-runs/`：定时任务的独立 TODO、stdout、stderr 和 Trace。
 - `.mini-openclaw/observations/`：被截断的完整工具结果。
 - `runs/<run-id>/`：实验元数据、日志和报告。
-- `traces/*.jsonl`：模型与工具轨迹。
+- `traces/*.jsonl`：模型与工具轨迹（v2 span 事件，同时兼容旧记录）。
 - `eval/results.csv`：真实任务评测结果。
