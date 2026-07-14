@@ -60,7 +60,7 @@ class DeepSeekBackend:
             payload["tool_choice"] = "auto"
 
         response = self._client.post(
-            f"{self.base_url}/v1/chat/completions",
+            self._chat_url(),
             headers={"Authorization": f"Bearer {self.api_key}"},
             json=payload,
         )
@@ -79,6 +79,9 @@ class DeepSeekBackend:
         result["usage"] = data.get("usage", {})
         result["model"] = data.get("model", self.model)
         return result
+
+    def _chat_url(self) -> str:
+        return f"{self.base_url}/v1/chat/completions"
 
     @staticmethod
     def _error_body(response: httpx.Response) -> str:

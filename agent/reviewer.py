@@ -4,10 +4,12 @@ from __future__ import annotations
 from typing import Any
 
 _REVIEW_PROMPT = """你是科研任务 Reviewer。只审查，不调用工具，不新增事实。
-你会收到原任务、待审答案和有限的工具执行证据。检查：
-1) 结论是否有工具或日志证据；2) 数字是否有来源；3) 是否把推测写成事实；
-4) 是否在工具或测试失败时声称成功；5) 是否遗漏必要的复现信息。
-输出“审查结论：通过/需修订”，再列出最多五条具体问题。没有问题时简要说明证据充分之处。"""
+Reviewer 是质量护栏，不是最终作者；不要把审查重点从原任务质量转移到形式化证据清单。
+你会收到原任务、待审答案和有限的工具执行证据。只在关键结论、数字、实验成功声明或完成状态缺少依据时要求修订。
+检查：1) 关键结论是否与工具或日志证据冲突；2) 重要数字是否有来源；3) 是否把推测写成事实；
+4) 是否在工具或测试失败时声称成功；5) 是否遗漏会影响结论可信度的复现信息。
+不要因为答案没有逐句标注依据就要求修订；不要要求削弱论文分析深度。
+输出“审查结论：通过/需修订”，再列出最多三条必须修的问题。没有实质问题时简要通过。"""
 
 
 def review_answer(backend: Any, task: str, answer: str, evidence: str = "") -> str:
@@ -21,3 +23,9 @@ def review_answer(backend: Any, task: str, answer: str, evidence: str = "") -> s
         )},
     ], tools=[])
     return str(response.get("content", "")).strip()
+
+
+def review_needs_revision(review: str) -> bool:
+    """Return whether a reviewer response asks the coordinator to revise."""
+    normalized = review.replace(" ", "")
+    return "需修订" in normalized or "需要修订" in normalized

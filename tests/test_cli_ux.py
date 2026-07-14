@@ -10,7 +10,10 @@ def test_cli_parser_defaults_to_quiet_default_permission_mode():
     args = _build_parser().parse_args([])
     assert args.permission_mode == "default"
     assert args.verbose is False
+    assert args.multi_agent is True
     assert _build_parser().parse_args(["--permission-mode", "plan"]).permission_mode == "plan"
+    assert _build_parser().parse_args(["--multi-agent"]).multi_agent is True
+    assert _build_parser().parse_args(["--no-multi-agent"]).multi_agent is False
 
 
 def test_quiet_renderer_hides_tool_arguments_but_steps_reveals_summary():

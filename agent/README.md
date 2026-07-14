@@ -22,6 +22,38 @@
 
 普通 CLI 会话启动时会为本次 run 分配 `.mini-openclaw/sessions/<run-id>/tasks.json`，并通过 `MINI_OPENCLAW_TODO_PATH` 传给 `task_list`、`todo_write`、`update_todo` 和上下文压缩快照读取逻辑；`/tasks` 默认显示当前会话的 TODO 文件。外部已经设置 `MINI_OPENCLAW_TODO_PATH` 时不会覆盖，因此调度器仍可使用 `.mini-openclaw/scheduler-runs/<run-id>.tasks.json` 作为每次定时任务的独立 TODO。旧的 `.mini-openclaw/tasks.json` 仅作为未设置环境变量时的兼容默认值。
 
+## 轻量多 Agent
+
+默认启用轻量多 Agent 编排；启动时可用 `--no-multi-agent` 禁用并回到单 Agent ReAct 主循环，`--multi-agent` 保留为显式开启/兼容开关。交互会话中可用 `/multi-agent on` 和 `/multi-agent off` 运行时切换，`/status` 会显示当前 `multi_agent` 状态。
+
+当前编排顺序是主 Agent 先做全局调度：判断是否启用子 agent，并输出结构化分工方案。简单、单步、无需跨角色协作的任务会由主 Agent 直接执行，不启动子 agent；复杂任务、需要多源证据、代码实验、论文/图表联合分析或用户明确要求子 agent 时，主 Agent 才会分配具体工作给 Research、Engineering 和 Multimodal Agent。Research Agent 负责论文、网页、PDF 和图表证据，Engineering Agent 负责代码阅读、修改建议、实验和验证，附带图片时可增加 Multimodal Agent。Reviewer 基于**子 agent 工具调用记录及其输出**审查关键依据和风险。Reviewer 是质量护栏，不是最终答案的主题；论文类任务的最终正文仍以论文分析、方法理解和结论讨论为中心。
+
+每个子 agent 复用现有 `AgentLoop`、权限层、工具注册表和 Trace，但会分配 `.mini-openclaw/subagents/<parent-run>/<role>/tasks.json` 作为独立 TODO，避免多角色互相覆盖状态。子 agent trace 写入主 trace 同目录下的 `subagents/`。
+
+后端选择采用文本主后端加视觉旁路：普通任务只初始化并使用 DeepSeek 文本后端；只有命令带 `--image` 时才额外初始化 Qwen 视觉后端。多 Agent 模式下主 Agent、Research、Engineering、Synthesis 和 Reviewer 继续使用文本后端，**只有带直接图像输入的 Multimodal Agent 接收图像并使用视觉后端**，避免昂贵视觉模型被非图像角色继承使用。单 Agent 且带图运行时才把该轮交给视觉后端。
+
+### 子 Agent 上下文结构
+
+每个子 agent 都是一个新的 `AgentLoop` 实例，不直接继承父 agent 的完整 `messages` 历史。它拥有独立的消息列表、`Tracer`、`PermissionManager`、TODO 文件、工具子集和 `max_turns=8` 的执行预算。子 agent 的 system prompt 由主 CLI 的 `system_prompt` 加对应角色提示组成，例如 Research Agent 会收到通用系统约束、运行时日期、权限规则和 Skills catalog，再追加 `RESEARCH_PROMPT`。
+
+子 agent 的 user message 会包装原始任务和主 Agent 分配的具体工作，而不是复制父会话历史：
+
+```text
+原始用户任务：
+<task>
+
+主 Agent 分配给你的具体工作：
+<assigned_task>
+
+请只完成 <role> 职责范围内的工作，并把证据、产物路径、失败原因和未完成项写清楚。
+```
+
+工具上下文按角色裁剪：Research Agent 主要看到论文、网页、PDF、图表分析和记忆工具；Engineering Agent 主要看到代码读写、`bash`、实验和记忆工具；Multimodal Agent 主要看到图片、PDF 和图表分析相关工具。每个子 agent 运行时会临时设置 `MINI_OPENCLAW_TODO_PATH=.mini-openclaw/subagents/<parent-run>/<role>/tasks.json`，因此角色之间的 TODO 状态互不覆盖。子 agent trace 写入 `traces/subagents/<parent-trace-stem>.<role>.jsonl`。带 `--image` 时，只有 Multimodal Agent 收到 image block 并使用视觉后端；Research、Engineering、Synthesis 和 Reviewer 继续使用文本后端。
+
+主 Agent 的调度方案会写入主 trace 的 `orchestration` 事件。启用子 agent 时，所有子 agent 输出会被拼成 `## Main Agent`、`## Multimodal Agent`、`## Research Agent`、`## Engineering Agent` 等证据块，再交给 Synthesis 生成最终回答；不启用子 agent 时，主 Agent 使用完整工具集直接完成任务。Reviewer 审查时会优先收到从各子 agent trace 中抽取的工具调用记录（工具名、参数、成功状态和截断 observation），再收到子 agent 输出文本，用于核对关键结论是否有执行证据。如果 Reviewer 返回“需修订”，Synthesis 会带着初版答案、Reviewer 意见和原始证据自动重写一次，要求保留原有分析深度，只做必要修正；随后再做复审。Reviewer 的初审、复审、证据摘要和是否触发修订只写入 trace，不打印到用户最终答案中。
+
+当前限制是：子 agent 主要继承基础 system prompt、原始任务、工作目录、工具注册表和磁盘状态；父 agent 临时注入到自身 `messages` 里的额外上下文不会自动复制到子 agent。
+
 ## 上下文压缩
 
 压缩采用本地版结构：

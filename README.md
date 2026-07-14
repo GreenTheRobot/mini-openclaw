@@ -153,6 +153,7 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 - 自动选择后端：优先使用 `DeepSeekBackend`，缺少配置时回退 `FakeBackend`。
 - 多模态运行：可通过 `--image <path>` 给任务附加图片，支持多次传入。
 - 视觉后端接入：图片任务会优先尝试使用 `QwenVisionBackend`，缺少 `QWEN_*` 配置时回退 `FakeBackend`。
+- Qwen 视觉配置：`QWEN_BASE_URL` 使用 DashScope/OpenAI-compatible base URL，例如 `https://dashscope.aliyuncs.com/compatible-mode/v1`；由于本项目直接用 `httpx` 发请求而不是 OpenAI SDK，视觉后端会请求其下的 `/chat/completions`。如需完全自定义裸请求地址，可设置 `QWEN_CHAT_URL`，它会被原样使用。
 - 自动接入 MCP：有 `npx` 时尝试启动官方 filesystem MCP server，否则回退本地 `mcp/calc_server.py`。
 - 系统提示词增强：启动时注入基础科研 agent 行为规范、工具说明和相关 Skills 内容。
 - 多轮工具调用：主循环可连续执行工具调用，直到模型给出最终回答或达到最大轮数。

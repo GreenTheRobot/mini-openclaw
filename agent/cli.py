@@ -220,6 +220,7 @@ def _show_help() -> None:
 - `/audit`：按需审查上一轮回答
 - `/tasks`：查看任务清单
 - `/memory`：查看项目长期记忆
+- `/multi-agent [on|off]`：查看或切换轻量多 agent 编排
 - `/trace`：汇总当前会话 Trace；`/trace replay` 回放；`/trace cost` 成本；`/trace diagnose` 诊断；`/trace html [输出路径]` 生成 HTML
 - `/status`：查看后端、权限、显示模式和会话状态
 - `/history`：查看当前对话消息摘要
@@ -271,8 +272,12 @@ def _interactive(
     renderer: EventRenderer,
     legacy_review_requested: bool = False,
     memory_enabled: bool = True,
+    multi_agent: bool = False,
+    system_prompt: str = "",
+    context_budget: int = 20000,
 ) -> int:
     manager = agent.permission_manager
+    multi_agent_enabled = multi_agent
     _show_intro(registry, skills, trace_path, manager, renderer)
     if legacy_review_requested:
         _print("[提示] 交互模式不再自动追加 Reviewer；需要时输入 /audit。")
@@ -355,6 +360,19 @@ def _interactive(
             from agent.memory import Memory
             _print(Memory("MEMORY.md").recall() or "暂无长期记忆。")
             continue
+        if command == "/multi-agent":
+            value = argument.strip().lower()
+            if not value:
+                _print(f"multi-agent 当前为 {'on' if multi_agent_enabled else 'off'}。用法：/multi-agent on 或 /multi-agent off")
+            elif value in {"on", "true", "1", "enable", "enabled"}:
+                multi_agent_enabled = True
+                _print("multi-agent 已开启；后续任务会走 Planner/Research/Engineering/Reviewer 编排。")
+            elif value in {"off", "false", "0", "disable", "disabled"}:
+                multi_agent_enabled = False
+                _print("multi-agent 已关闭；后续任务会回到单 Agent ReAct 主循环。")
+            else:
+                _print("用法：/multi-agent on 或 /multi-agent off")
+            continue
         if command == "/trace":
             from eval.trace_report import cost_report, diagnose, render_terminal, summarize, write_html
             trace_action, _, trace_output = argument.strip().partition(" ")
@@ -385,6 +403,7 @@ def _interactive(
                 "backend": type(backend).__name__,
                 "permission_mode": manager.mode,
                 "todo_path": str(_todo_state_path()),
+                "multi_agent": multi_agent_enabled,
                 "output": "verbose" if renderer.verbose else "quiet",
                 "messages": len(agent.messages),
                 "loaded_contexts": sorted(agent.loaded_contexts),
@@ -408,7 +427,23 @@ def _interactive(
         )
         renderer.begin_turn()
         try:
-            answer = agent.run(task)
+            if multi_agent_enabled:
+                from agent.subagents import run_multi_agent
+                answer = run_multi_agent(
+                    task=task,
+                    backend=backend,
+                    registry=registry,
+                    system_prompt=system_prompt or agent.system_prompt,
+                    workdir=agent.workdir,
+                    trace_path=trace_path,
+                    parent_run_id=tracer.run_id,
+                    permission_mode=manager.mode,
+                    auto_approve=agent.auto_approve,
+                    confirm_callback=agent.confirm_callback,
+                    context_budget=context_budget,
+                )
+            else:
+                answer = agent.run(task)
             _print_markdown("\n" + answer)
             last_task, last_answer = task, answer
         except KeyboardInterrupt:
@@ -431,6 +466,20 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verbose", action="store_true", help="实时显示每轮模型和工具事件")
     parser.add_argument("--audit", action="store_true", help="单次任务完成后审查最终回答")
     parser.add_argument("--review", action="store_true", help=argparse.SUPPRESS)
+    multi_agent_group = parser.add_mutually_exclusive_group()
+    multi_agent_group.add_argument(
+        "--multi-agent",
+        dest="multi_agent",
+        action="store_true",
+        default=True,
+        help="启用 Planner/Research/Engineering/Reviewer 轻量多 agent 编排（默认开启）",
+    )
+    multi_agent_group.add_argument(
+        "--no-multi-agent",
+        dest="multi_agent",
+        action="store_false",
+        help="禁用轻量多 agent 编排，回到单 Agent ReAct 主循环",
+    )
     parser.add_argument("--context-budget", type=int, default=20000, help="触发历史压缩的估算 token 阈值")
     return parser
 
@@ -462,22 +511,23 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             _print(f"[提示] MCP 未接入：{exc}")
 
+    try:
+        from backend.client import DeepSeekBackend
+        backend = DeepSeekBackend()
+    except Exception as exc:
+        from backend.fake_backend import FakeBackend
+        _print(f"[提示] DeepSeek 后端不可用：{exc}；回退 FakeBackend。")
+        backend = FakeBackend()
+
+    vision_backend = None
     if args.image:
         try:
             from backend.qwen_vision import QwenVisionBackend
-            backend = QwenVisionBackend()
+            vision_backend = QwenVisionBackend()
         except Exception as exc:
             from backend.fake_backend import FakeBackend
-            _print(f"[提示] 视觉后端不可用：{exc}；回退 FakeBackend。")
-            backend = FakeBackend()
-    else:
-        try:
-            from backend.client import DeepSeekBackend
-            backend = DeepSeekBackend()
-        except Exception as exc:
-            from backend.fake_backend import FakeBackend
-            _print(f"[提示] DeepSeek 后端不可用：{exc}；回退 FakeBackend。")
-            backend = FakeBackend()
+            _print(f"[提示] 视觉后端不可用：{exc}；图像分支回退 FakeBackend。")
+            vision_backend = FakeBackend()
 
     if args.ablation == "no-planning":
         registry.remove("todo_write")
@@ -530,6 +580,9 @@ def main(argv: list[str] | None = None) -> int:
             agent, backend, registry, tracer, trace_path, skills,
             planning_enabled, renderer, legacy_review_requested=args.review,
             memory_enabled=args.ablation != "no-memory",
+            multi_agent=args.multi_agent,
+            system_prompt=system,
+            context_budget=args.context_budget,
         )
 
     _prepare_turn_context(
@@ -537,7 +590,39 @@ def main(argv: list[str] | None = None) -> int:
         memory_enabled=args.ablation != "no-memory",
     )
     renderer.begin_turn()
-    answer = agent.run(args.task, image_paths=args.image)
+    if args.multi_agent:
+        from agent.subagents import run_multi_agent
+        answer = run_multi_agent(
+            task=args.task,
+            backend=backend,
+            vision_backend=vision_backend,
+            registry=registry,
+            system_prompt=system,
+            workdir=agent.workdir,
+            trace_path=trace_path,
+            parent_run_id=tracer.run_id,
+            image_paths=args.image,
+            permission_mode=args.permission_mode,
+            auto_approve=args.auto_approve,
+            confirm_callback=_confirm_tool_call,
+            context_budget=args.context_budget,
+        )
+    else:
+        if args.image and vision_backend is not None:
+            vision_agent = AgentLoop(
+                vision_backend,
+                registry,
+                system,
+                auto_approve=args.auto_approve,
+                confirm_callback=_confirm_tool_call,
+                tracer=tracer,
+                event_callback=renderer,
+                context_budget=args.context_budget,
+                permission_manager=manager,
+            )
+            answer = vision_agent.run(args.task, image_paths=args.image)
+        else:
+            answer = agent.run(args.task)
     _print_markdown(answer)
     if args.audit or args.review:
         _audit(backend, tracer, args.task, answer, renderer.audit_evidence())
