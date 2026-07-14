@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
+import os
 
-from agent.cli import _build_parser, _prepare_turn_context, _runtime_context
+from agent.cli import _build_parser, _ensure_session_todo_path, _prepare_turn_context, _runtime_context
 from agent.memory import Memory
 from agent.ui import EventRenderer
 
@@ -57,3 +58,23 @@ def test_turn_context_loads_latest_disk_memory(tmp_path, monkeypatch):
 
     assert any(key.startswith("project-memory:") for key in loaded)
     assert "跨会话约定：报告先写结论" in "\n".join(loaded.values())
+
+
+def test_cli_assigns_isolated_todo_path_when_unset(monkeypatch):
+    monkeypatch.delenv("MINI_OPENCLAW_TODO_PATH", raising=False)
+
+    try:
+        path = _ensure_session_todo_path("run/id:one")
+
+        assert path.as_posix() == ".mini-openclaw/sessions/run-id-one/tasks.json"
+        assert os.environ["MINI_OPENCLAW_TODO_PATH"] == path.as_posix()
+    finally:
+        os.environ.pop("MINI_OPENCLAW_TODO_PATH", None)
+
+
+def test_cli_preserves_existing_todo_path(monkeypatch):
+    monkeypatch.setenv("MINI_OPENCLAW_TODO_PATH", ".mini-openclaw/scheduler-runs/x.tasks.json")
+
+    path = _ensure_session_todo_path("new-run")
+
+    assert path.as_posix() == ".mini-openclaw/scheduler-runs/x.tasks.json"

@@ -18,6 +18,10 @@
 
 并发写入使用 `agent.memory` 内部的跨平台 lock-file：对同一个记忆文件会创建 `<filename>.lock`，通过原子创建锁文件串行化读写，并在锁陈旧（距离最后修改时间超过5min）后自动清理，避免崩溃进程永久占用。Markdown 记忆在锁内追加，KV 记忆在锁内重新读取、合并、写入唯一临时文件并用 `os.replace` 原子替换，避免两个会话各自持有旧快照时出现 lost update。所有写入前都会清理非法 surrogate，保证记忆文件可用 UTF-8 稳定读写。
 
+## TODO 状态隔离
+
+普通 CLI 会话启动时会为本次 run 分配 `.mini-openclaw/sessions/<run-id>/tasks.json`，并通过 `MINI_OPENCLAW_TODO_PATH` 传给 `task_list`、`todo_write`、`update_todo` 和上下文压缩快照读取逻辑；`/tasks` 默认显示当前会话的 TODO 文件。外部已经设置 `MINI_OPENCLAW_TODO_PATH` 时不会覆盖，因此调度器仍可使用 `.mini-openclaw/scheduler-runs/<run-id>.tasks.json` 作为每次定时任务的独立 TODO。旧的 `.mini-openclaw/tasks.json` 仅作为未设置环境变量时的兼容默认值。
+
 ## 上下文压缩
 
 压缩采用本地版结构：

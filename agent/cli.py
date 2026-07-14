@@ -156,6 +156,22 @@ def _runtime_context(now: datetime | None = None) -> str:
         "不得用旧年份搜索结果冒充近期结果。"
     )
 
+
+def _todo_state_path() -> Path:
+    configured = os.environ.get("MINI_OPENCLAW_TODO_PATH", "").strip()
+    return Path(configured) if configured else Path(".mini-openclaw/tasks.json")
+
+
+def _ensure_session_todo_path(run_id: str) -> Path:
+    existing = os.environ.get("MINI_OPENCLAW_TODO_PATH", "").strip()
+    if existing:
+        return Path(existing)
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", run_id).strip("-") or str(os.getpid())
+    path = Path(".mini-openclaw") / "sessions" / safe_id / "tasks.json"
+    os.environ["MINI_OPENCLAW_TODO_PATH"] = path.as_posix()
+    return path
+
+
 def _prepare_turn_context(agent: Any, task: str, skills: list[Any], planning: bool,
                           memory_enabled: bool = True) -> None:
     if memory_enabled:
@@ -332,7 +348,7 @@ def _interactive(
                     _print(f"[audit error] {exc}")
             continue
         if command == "/tasks":
-            path = Path(".mini-openclaw/tasks.json")
+            path = _todo_state_path()
             _print(path.read_text(encoding="utf-8") if path.exists() else "暂无任务清单。")
             continue
         if command == "/memory":
@@ -368,6 +384,7 @@ def _interactive(
                 "workdir": str(Path.cwd()),
                 "backend": type(backend).__name__,
                 "permission_mode": manager.mode,
+                "todo_path": str(_todo_state_path()),
                 "output": "verbose" if renderer.verbose else "quiet",
                 "messages": len(agent.messages),
                 "loaded_contexts": sorted(agent.loaded_contexts),
@@ -492,6 +509,7 @@ def main(argv: list[str] | None = None) -> int:
         except json.JSONDecodeError:
             _print("[提示] 忽略格式错误的 MINI_OPENCLAW_TRACE_CONTEXT。")
     tracer = Tracer(trace_path, metadata=trace_metadata)
+    _ensure_session_todo_path(tracer.run_id)
     renderer = EventRenderer(_print, verbose=args.verbose)
     manager = PermissionManager(args.permission_mode)
     agent = AgentLoop(

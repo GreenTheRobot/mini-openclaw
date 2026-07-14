@@ -40,7 +40,7 @@ def _file_lock(path: Path, timeout_seconds: float = 10.0, stale_seconds: float =
             finally:
                 os.close(fd)
             break
-        except FileExistsError:
+        except (FileExistsError, PermissionError):
             try:
                 age = time.time() - lock_path.stat().st_mtime
             except FileNotFoundError:
