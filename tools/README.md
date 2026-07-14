@@ -1,6 +1,14 @@
 # Tools 模块
 
-工具通过 `Tool(name, description, parameters, run)` 统一注册。执行前由 JSON Schema 子集校验参数，再经过权限层。包含文件、Shell、检索、PDF、实验、任务清单、记忆和微信工具。
+工具通过 `Tool(name, description, parameters, run)` 统一注册。执行前由 JSON Schema 子集校验参数，再经过权限层。包含文件、Shell、检索、PDF、论文图片、实验、任务清单、定时科研任务、记忆和微信工具。
+
+## PDF 与论文图片
+
+`pdf_extract_text` 默认先评估 GPU：显存达到 Marker 阈值时使用 Marker，否则使用 MarkItDown；主解析器失败后才使用 pypdf 兜底。产物均落在项目内相对目录，包含 `paper.md`、`image_manifest.json` 和 `images/`。`paper_figure_analyze` 使用配置的视觉后端分析这些图片；分析规则来自 `skills/paper-figure-reader`，因此该 Skill 仍然有效。
+
+## 定时科研任务
+
+`schedule_task` 将任务保存到 `.mini-openclaw/schedules.json`，只接受项目内相对 `workdir`。每次运行独立启动 Agent CLI，并在 `.mini-openclaw/scheduler-runs/` 保存 stdout、stderr、Trace 和独立 TODO 状态；设置 `max_runs` 后达到指定轮数会自动禁用；后台可通过 `python -m agent.scheduler run-due` 配合 cron/systemd timer 周期触发。
 
 ## wechat
 

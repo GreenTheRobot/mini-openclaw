@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -137,7 +138,8 @@ def repair_tool_protocol(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
 def _load_task_items(workdir: str | Path | None = None) -> list[dict[str, Any]]:
     if workdir is None:
         return []
-    path = Path(workdir) / TASK_STATE_PATH
+    configured = os.environ.get("MINI_OPENCLAW_TODO_PATH", "").strip()
+    path = Path(workdir) / (Path(configured) if configured else TASK_STATE_PATH)
     if not path.exists():
         return []
     try:
@@ -161,7 +163,7 @@ def task_state_snapshot(workdir: str | Path | None = None) -> str:
 
     lines = [
         "## 权威 TODO 快照",
-        "来源：.mini-openclaw/tasks.json。这个状态优先于模型生成的压缩摘要。",
+        "来源：当前 TODO 状态文件。这个状态优先于模型生成的压缩摘要。",
     ]
     open_ids: list[str] = []
     for item in items:

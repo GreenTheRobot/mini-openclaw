@@ -12,6 +12,8 @@ markdownify>=0.13    # web_fetch: HTML -> markdown
 pypdf>=4.0            # 轻量 PDF 文本与元数据提取
 markitdown[all]>=0.1.0   # 文档/PDF/网页导出文件 -> markdown
 marker-pdf>=1.0.0        # 学术 PDF -> markdown（较重；需要 Python 3.10+，通常会安装 PyTorch 相关依赖）
+pymupdf>=1.24          # MarkItDown 之外的 PDF 图片提取与页面渲染
+croniter>=2.0         # 定时科研任务的 cron 表达式计算
 
 # --- Day8 MCP（可选，最小客户端可不依赖官方 SDK）---
 # mcp>=1.0           # 官方 SDK，做对照时再装

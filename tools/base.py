@@ -126,6 +126,8 @@ def build_default_registry() -> ToolRegistry:
     from .memory import remember_tool
     from .todo import todo_write_tool, update_todo_tool
     from .pdf import pdf_extract_text_tool, pdf_metadata_tool
+    from .figure import paper_figure_analyze_tool
+    from .schedule import schedule_task_tool
     from .experiment import (
         experiment_prepare_tool, experiment_smoke_test_tool, experiment_start_tool,
         experiment_status_tool, experiment_report_tool,
@@ -134,6 +136,8 @@ def build_default_registry() -> ToolRegistry:
         read_tool, write_tool, bash_tool, edit_tool, grep_tool, glob_tool,
         arxiv_search_tool, web_search_tool, web_fetch_tool, download_file_tool, wechat_file_transfer_tool,
         remember_tool, todo_write_tool, update_todo_tool, pdf_extract_text_tool, pdf_metadata_tool,
+        paper_figure_analyze_tool,
+        schedule_task_tool,
         experiment_prepare_tool, experiment_smoke_test_tool, experiment_start_tool,
         experiment_status_tool, experiment_report_tool,
     ):

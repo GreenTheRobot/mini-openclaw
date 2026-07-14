@@ -14,7 +14,9 @@ EXTERNAL_SEND = {"wechat_file_transfer"}
 DOWNLOAD = {"download_file"}
 MEMORY_WRITE = {"remember"}
 PLANNING = {"task_list", "todo_write", "update_todo"}
+SCHEDULING = {"schedule_task"}
 PDF_READ = {"pdf_extract_text", "pdf_metadata"}
+FIGURE_READ = {"paper_figure_analyze"}
 EXPERIMENT_READ = {"experiment_status"}
 EXPERIMENT_WRITE = {"experiment_prepare", "experiment_report"}
 EXPERIMENT_EXEC = {"experiment_smoke_test", "experiment_start"}
@@ -144,8 +146,15 @@ def check(tool: str, args: dict[str, Any], workdir: Path, *, mode: str = "defaul
         return _path_decision(grep_args, workdir, confirm=False)
     if tool in PDF_READ:
         return _path_decision(args, workdir, confirm=False)
+    if tool in FIGURE_READ:
+        return _path_decision(args, workdir, confirm=False)
     if tool in PLANNING:
         return PermissionDecision("allow", "任务规划仅写入工作目录内部状态")
+    if tool in SCHEDULING:
+        action = str(args.get("action", ""))
+        if action == "list":
+            return PermissionDecision("allow", "读取工作目录内的调度配置")
+        return PermissionDecision("confirm", "将创建或改变自动科研任务调度配置")
     if tool in EXTERNAL_SEND and "dry_run" in args and bool(args.get("dry_run")):
         return PermissionDecision("allow", "微信通知处于 dry-run，仅生成预览，不产生外部副作用")
 

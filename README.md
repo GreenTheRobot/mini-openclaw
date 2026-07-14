@@ -130,6 +130,8 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 - [X] 完成红队报告：`security/redteam_report.md` 基于最新 CSV 人工总结被拦截项、暴露缺口和改进建议。
 - [X] 完成评测基础模块：包含任务集、轨迹记录、工具调用指标、消融样例和 LLM-as-judge 雏形。
 - [X] 完成多模态与文献解析依赖维护：`requirements.txt` 增加 `pillow`、`rich`、`markitdown[all]`、`marker-pdf`。
+- [X] 完成 PDF 解析运行链路：优先评估 GPU 使用 Marker，GPU 不满足时降级 MarkItDown，并用 PyMuPDF 保存论文图片和 `image_manifest.json`。
+- [X] 完成相对路径定时科研任务：`schedule_task` 管理任务，独立运行保存 TODO、stdout、stderr 和 Trace；可由 `python -m agent.scheduler run-due` 配合系统定时器触发。
 
 ## 已实现功能清单
 
@@ -154,6 +156,9 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 - `edit`：基于唯一 `old` 片段做局部替换，避免误改多处。
 - `grep`：基于 ripgrep 搜索文件内容，返回文件和行号。
 - `glob`：按通配模式递归查找文件。
+- `pdf_metadata` / `pdf_extract_text`：读取 PDF 元数据和正文，按 GPU 条件选择 Marker/MarkItDown，并保存相对路径图片素材。
+- `paper_figure_analyze`：调用视觉后端分析 PDF 生成的 figure/table 图片，遵循 `paper-figure-reader` Skill。
+- `schedule_task`：创建、查看、暂停、恢复、删除或立即执行相对路径科研任务。
 - `web_fetch`：抓取白名单域名 URL，转成 markdown，控制返回长度，并用 `external` wrapper 标记为非用户指令。
 - `wechat_file_transfer`：向固定允许列表内的微信会话发送文本，默认目标为文件传输助手；额外目标需由运行环境预先配置 `WX_ALLOWED_TARGETS`，用户/模型不能临时扩展联系人。设置 `WECHAT_DRY_RUN=1` 时只在终端打印目标和内容，不连接桥接服务、不发送真实消息；连接不上桥接服务时会默认尝试启动 `services\wechat_bridge\start.ps1`，可用 `WECHAT_BRIDGE_START_CMD` 覆盖启动命令。
 
@@ -181,7 +186,8 @@ python -m agent.cli "根据这张终端报错截图定位并修复问题" --imag
 - 图片输入编码：支持 PNG、JPEG、WEBP，并在长边超过限制时自动缩放。
 - 论文图表分析：区分可见事实、合理推断和无法可靠读取的信息。
 - Literature review 工作流：支持从研究问题界定到文献矩阵、主题综合、复现建议和最终 markdown 报告。
-- PDF 解析工具规划：文献综述 Skill 内置 `markitdown` 与 `marker` 的使用选择规则。
+- PDF 解析工具：`pdf_extract_text` 按 GPU 条件选择 Marker/MarkItDown，解析图片交给 `paper_figure_analyze`，规则由 `paper-figure-reader` Skill 维护。
+- 定时科研任务：调度配置和运行产物只保存项目内相对路径；每次运行使用独立 TODO 状态，存在未完成 TODO 时运行状态不会标记为 completed。
 - 报错截图调试：强调先截图转写，再用 `grep`/`glob`/`read` 本地验证，最后 `edit`/`bash` 修复验证。
 
 ### 评测与可观测能力

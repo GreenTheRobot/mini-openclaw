@@ -21,6 +21,8 @@ flowchart LR
     C --> L
     L --> R[最终回答/实验报告]
     L --> X[Trace JSONL]
+    J[相对路径调度器] --> CLI
+    J --> Q[独立 TODO/日志/Trace]
 ```
 
 ## 关键取舍
@@ -29,7 +31,8 @@ flowchart LR
 - `edit` 采用唯一文本匹配：牺牲大规模重写速度，降低误改风险。
 - 工具错误作为 observation：单步失败不拖垮任务，模型能根据结构化错误修复参数。
 - 长工具结果保存到 `.mini-openclaw/observations/`，上下文只保留头尾与路径。
-- Skills 是领域流程，Tools 是一次可执行动作；二者不混用。
+- Skills 是领域流程，Tools 是一次可执行动作；二者不混用。`paper-figure-reader` 定义图像分析规范，`paper_figure_analyze` 负责视觉后端桥接。
+- 调度器只持久化相对路径；每次运行隔离 TODO、stdout、stderr 和 Trace，并以未完成 TODO 阻止 `completed` 状态。
 - 外部网页、HTML 和 PDF 都是不可信数据，内容不能提升权限。
 - 实验元数据、日志和报告绑定 Git、配置、随机种子和输出路径。
 
@@ -37,7 +40,7 @@ flowchart LR
 
 1. 后端层：DeepSeek 文本、Qwen 视觉、FakeBackend 离线自检。
 2. Agent 层：主循环、计划、上下文、记忆和权限。
-3. 工具层：文件、Shell、搜索、PDF、实验、通知和任务清单。
+3. 工具层：文件、Shell、搜索、PDF、论文图片、实验、通知、任务清单和定时任务。
 4. 扩展层：MCP 与科研 Skills。
 5. 安全层：工作目录边界、确认、危险命令和注入隔离。
 6. 评测层：Trace、任务集、红队、真实消融与成本指标。
@@ -45,6 +48,8 @@ flowchart LR
 ## 运行产物
 
 - `.mini-openclaw/tasks.json`：长任务状态。
+- `.mini-openclaw/schedules.json`：相对路径科研任务调度配置。
+- `.mini-openclaw/scheduler-runs/`：定时任务的独立 TODO、stdout、stderr 和 Trace。
 - `.mini-openclaw/observations/`：被截断的完整工具结果。
 - `runs/<run-id>/`：实验元数据、日志和报告。
 - `traces/*.jsonl`：模型与工具轨迹。

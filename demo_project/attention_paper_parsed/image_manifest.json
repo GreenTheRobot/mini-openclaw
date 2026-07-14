@@ -1,0 +1,38 @@
+[
+  {
+    "path": "demo_project/attention_paper_parsed/images/marker-001.jpeg",
+    "kind": "marker_image",
+    "source_name": "_page_2_Figure_0.jpeg",
+    "sha256": "7dcf8ded143763ef7ae8ed303154e8e804ea07f3188e06f3aa7b1bf47b3fa480"
+  },
+  {
+    "path": "demo_project/attention_paper_parsed/images/marker-002.jpeg",
+    "kind": "marker_image",
+    "source_name": "_page_3_Figure_1.jpeg",
+    "sha256": "8c7cad581405836a5858326f4f00dea7c042ddba5059b8ead7c00d1ff1a3bc17"
+  },
+  {
+    "path": "demo_project/attention_paper_parsed/images/marker-003.jpeg",
+    "kind": "marker_image",
+    "source_name": "_page_3_Picture_2.jpeg",
+    "sha256": "2a96eb76f9cf8f64a14547e0ea7b82da8d849b421a44e1472e1d9106804946b2"
+  },
+  {
+    "path": "demo_project/attention_paper_parsed/images/marker-004.jpeg",
+    "kind": "marker_image",
+    "source_name": "_page_12_Figure_1.jpeg",
+    "sha256": "65b28e50b254d5956268a14f4a24f42276e855da080a7a5f88a991712cc8418a"
+  },
+  {
+    "path": "demo_project/attention_paper_parsed/images/marker-005.jpeg",
+    "kind": "marker_image",
+    "source_name": "_page_13_Figure_0.jpeg",
+    "sha256": "54c5413d3bd19b60c8b457b08cf06c14260410671ac0af1ce6f075fd30f34e09"
+  },
+  {
+    "path": "demo_project/attention_paper_parsed/images/marker-006.jpeg",
+    "kind": "marker_image",
+    "source_name": "_page_14_Figure_0.jpeg",
+    "sha256": "ed742d42c77bed08b4057158d349095b5528f118917ac321ed2f6f210dd5483c"
+  }
+]

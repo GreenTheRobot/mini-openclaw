@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -12,7 +13,13 @@ _STATE_PATH = Path(".mini-openclaw/tasks.json")
 _ALLOWED_STATUS = {"pending", "in_progress", "completed", "failed", "blocked"}
 
 
-def _load(path: Path = _STATE_PATH) -> dict[str, Any]:
+def _state_path() -> Path:
+    raw = os.environ.get("MINI_OPENCLAW_TODO_PATH", "").strip()
+    return Path(raw) if raw else _STATE_PATH
+
+
+def _load(path: Path | None = None) -> dict[str, Any]:
+    path = path or _state_path()
     if not path.exists():
         return {"items": []}
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -21,7 +28,8 @@ def _load(path: Path = _STATE_PATH) -> dict[str, Any]:
     return data
 
 
-def _save(data: dict[str, Any], path: Path = _STATE_PATH) -> None:
+def _save(data: dict[str, Any], path: Path | None = None) -> None:
+    path = path or _state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
