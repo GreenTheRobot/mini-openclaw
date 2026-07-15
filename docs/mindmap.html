@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mini-OpenClaw｜科研智能体思维导图</title>
+  <style>
+    :root {
+      --ink: #173a63;
+      --canvas: #f8fbff;
+      --grid: #dceafb;
+      --text: #1d2c3d;
+      --muted: #637286;
+      --line: #d9e3ee;
+      --blue: #1565d8;
+      --purple: #6d36d9;
+      --teal: #0e9998;
+      --orange: #f17b12;
+      --green: #21a455;
+      --cyan: #159fc1;
+      --red: #e54842;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--text);
+      font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+      background: #edf4fb;
+    }
+
+    .page {
+      width: min(1920px, calc(100vw - 48px));
+      min-height: 100vh;
+      margin: 24px auto;
+      padding: clamp(24px, 3.2vw, 58px);
+      overflow: hidden;
+      background-color: var(--canvas);
+      background-image: radial-gradient(var(--grid) 1.1px, transparent 1.2px);
+      background-size: 30px 30px;
+      border-radius: 28px;
+      box-shadow: 0 18px 58px rgb(35 72 111 / 14%);
+    }
+
+    .map {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) minmax(400px, 1.45fr) minmax(260px, 1fr);
+      grid-template-rows: auto 196px auto auto;
+      grid-template-areas:
+        "architecture planning code"
+        "research hero extension"
+        "research experiment extension"
+        "security security security";
+      gap: 54px clamp(28px, 4.4vw, 78px);
+      align-items: center;
+      max-width: 1780px;
+      margin: 0 auto;
+      padding-top: 18px;
+    }
+
+    .connectors {
+      position: absolute;
+      z-index: 0;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      pointer-events: none;
+    }
+
+    .connector {
+      fill: none;
+      stroke: var(--color);
+      stroke-linecap: round;
+      stroke-width: 3;
+    }
+
+    .node, .hero { position: relative; z-index: 1; }
+
+    .node {
+      --color: var(--blue);
+      padding: 28px 25px 20px;
+      min-height: 220px;
+      background: rgb(255 255 255 / 94%);
+      border: 2px solid var(--color);
+      border-radius: 22px;
+      box-shadow: 0 8px 22px rgb(30 58 90 / 5%);
+    }
+
+    .architecture { grid-area: architecture; --color: var(--blue); }
+    .planning { grid-area: planning; --color: var(--purple); }
+    .code { grid-area: code; --color: var(--teal); }
+    .research { grid-area: research; --color: var(--orange); }
+    .extension { grid-area: extension; --color: var(--cyan); }
+    .experiment { grid-area: experiment; --color: var(--green); }
+    .security { grid-area: security; --color: var(--red); }
+
+    .node-head {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      margin-top: -56px;
+      margin-bottom: 15px;
+    }
+
+    .icon-disc {
+      display: grid;
+      flex: 0 0 68px;
+      width: 68px;
+      height: 68px;
+      place-items: center;
+      color: #fff;
+      background: var(--color);
+      border-radius: 50%;
+      box-shadow: 0 5px 13px rgb(17 56 92 / 12%);
+    }
+
+    .icon { width: 31px; height: 31px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+
+    .node h2 {
+      width: fit-content;
+      max-width: calc(100% - 10px);
+      margin: 0;
+      padding: 12px 26px;
+      color: #fff;
+      background: var(--color);
+      border-radius: 999px;
+      font-size: clamp(20px, 1.7vw, 29px);
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .node ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .node li {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-height: 35px;
+      padding: 7px 0;
+      border-top: 1px solid var(--line);
+      font-size: clamp(14px, 1.1vw, 17px);
+      line-height: 1.28;
+    }
+
+    .node li:first-child { border-top: 0; }
+    .node li::before { content: ""; flex: 0 0 8px; width: 8px; height: 8px; background: var(--color); border-radius: 50%; }
+
+    .hero {
+      grid-area: hero;
+      display: grid;
+      min-height: 178px;
+      place-content: center;
+      padding: 22px 38px;
+      color: #fff;
+      text-align: center;
+      background: var(--ink);
+      border: 3px solid #0b284a;
+      border-radius: 100px;
+      box-shadow: inset 0 1px 0 rgb(255 255 255 / 22%), 0 14px 28px rgb(19 58 99 / 17%);
+    }
+
+    .hero h2 { margin: 0; font-size: clamp(36px, 3.5vw, 60px); line-height: .98; letter-spacing: -.04em; }
+    .hero strong { display: block; margin-top: 9px; font-size: clamp(28px, 2.35vw, 43px); }
+    .hero p { margin: 15px 0 0; color: #bbd7ff; font-size: clamp(16px, 1.35vw, 21px); font-weight: 700; word-spacing: .35em; }
+
+    .experiment { min-height: 151px; padding: 25px 30px 15px; }
+    .experiment .node-head { margin-bottom: 13px; }
+    .flow-steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; margin-top: 5px; }
+    .flow-step { display: grid; place-items: center; gap: 9px; min-height: 64px; padding: 0 8px; text-align: center; border-left: 1px solid #cfe9d7; font-size: 14px; font-weight: 800; }
+    .flow-step:first-child { border-left: 0; }
+    .flow-step .icon { width: 28px; height: 28px; color: var(--green); }
+
+    .security { min-height: 102px; padding: 25px 38px 13px; }
+    .security .node-head { margin-bottom: 7px; }
+    .security-grid { display: grid; grid-template-columns: repeat(5, 1fr); }
+    .security-item { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 38px; padding: 0 10px; color: var(--text); font-size: 15px; font-weight: 800; border-left: 1px solid #f3c6c4; }
+    .security-item:first-child { border-left: 0; }
+    .security-item .icon { width: 23px; height: 23px; color: var(--red); }
+
+    .asset-note {
+      position: relative;
+      z-index: 1;
+      max-width: 1780px;
+      margin: 28px auto 0;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: right;
+    }
+
+    @media (max-width: 1100px) {
+      .page { width: min(100% - 24px, 900px); margin: 12px auto; padding: 42px 24px; border-radius: 20px; }
+      .map { display: flex; flex-direction: column; gap: 58px; }
+      .connectors { display: none; }
+      .node, .hero { width: 100%; }
+      .hero { order: -1; }
+      .planning { order: -2; }
+      .flow-steps, .security-grid { grid-template-columns: 1fr; gap: 4px; }
+      .flow-step, .security-item { justify-content: flex-start; min-height: 38px; text-align: left; border-top: 1px solid var(--line); border-left: 0; }
+      .flow-step:first-child, .security-item:first-child { border-top: 0; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .page { width: 100%; margin: 0; box-shadow: none; border-radius: 0; }
+    }
+
+    /* Visual refresh: a restrained "research command center" direction. */
+    body {
+      background: #07101c;
+      color: #e9f2ff;
+    }
+
+    .page {
+      position: relative;
+      isolation: isolate;
+      width: min(1920px, calc(100vw - 36px));
+      margin: 18px auto;
+      padding: clamp(30px, 3.6vw, 68px);
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 43%, rgb(34 95 170 / 26%), transparent 28%),
+        radial-gradient(circle at 10% 5%, rgb(85 73 190 / 18%), transparent 28%),
+        radial-gradient(circle at 92% 88%, rgb(16 153 152 / 13%), transparent 26%),
+        linear-gradient(140deg, #071322 0%, #0a1a2d 50%, #081726 100%);
+      border: 1px solid rgb(159 192 237 / 15%);
+      border-radius: 30px;
+      box-shadow: 0 34px 100px rgb(0 0 0 / 42%);
+    }
+
+    .page::before {
+      position: absolute;
+      z-index: -1;
+      inset: 0;
+      content: "";
+      opacity: .24;
+      background-image:
+        linear-gradient(rgb(137 181 234 / 12%) 1px, transparent 1px),
+        linear-gradient(90deg, rgb(137 181 234 / 12%) 1px, transparent 1px);
+      background-size: 46px 46px;
+      mask-image: linear-gradient(to bottom, #000, transparent 86%);
+    }
+
+    .map {
+      grid-template-rows: 276px 248px 180px 142px;
+      gap: 54px clamp(32px, 4.4vw, 80px);
+    }
+
+    .connectors { opacity: .72; filter: drop-shadow(0 0 6px rgb(75 149 255 / 26%)); }
+    .connector { stroke-width: 2.2; stroke-dasharray: 3 7; }
+
+    .node {
+      min-height: 0;
+      padding: 22px 24px 18px;
+      overflow: hidden;
+      background: linear-gradient(145deg, rgb(20 40 62 / 89%), rgb(9 24 40 / 91%));
+      border: 1px solid rgb(169 204 246 / 18%);
+      border-radius: 18px;
+      box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%), 0 16px 32px rgb(0 0 0 / 16%);
+    }
+
+    .node::before {
+      position: absolute;
+      top: 0;
+      left: 22px;
+      width: calc(100% - 44px);
+      height: 2px;
+      content: "";
+      background: linear-gradient(90deg, transparent, var(--color), transparent);
+      box-shadow: 0 0 14px var(--color);
+    }
+
+    .node-head {
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 12px;
+    }
+
+    .icon-disc {
+      flex: 0 0 52px;
+      width: 52px;
+      height: 52px;
+      color: var(--color);
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
+
+    .icon {
+      width: 39px;
+      height: 39px;
+      stroke-width: 1.65;
+      filter: drop-shadow(0 0 8px color-mix(in srgb, currentColor 60%, transparent));
+    }
+
+    .icon { fill: currentColor; stroke: none; }
+
+    .node h2 {
+      max-width: none;
+      padding: 0;
+      color: #f2f7ff;
+      background: none;
+      border-radius: 0;
+      font-size: clamp(19px, 1.5vw, 25px);
+      font-weight: 900;
+      line-height: 1.1;
+      letter-spacing: -.015em;
+      text-shadow: 0 2px 14px rgb(123 184 255 / 18%);
+      white-space: normal;
+    }
+
+    .node li {
+      gap: 9px;
+      min-height: 0;
+      padding: 7px 0;
+      color: #d7e4f4;
+      border-color: rgb(169 204 246 / 12%);
+      font-size: clamp(13px, 1vw, 15px);
+      line-height: 1.34;
+    }
+
+    .node li strong {
+      color: #f5f9ff;
+      font-weight: 800;
+    }
+
+    .node li::before {
+      flex-basis: 6px;
+      width: 6px;
+      height: 6px;
+      margin-top: .34em;
+      box-shadow: 0 0 8px var(--color);
+    }
+
+    .planning { padding-right: 30px; }
+    .planning li { padding-block: 6px; }
+
+    .planning-tree {
+      display: grid;
+      gap: 4px;
+      color: #d7e4f4;
+      font-size: clamp(12px, .95vw, 14px);
+      line-height: 1.28;
+    }
+
+    .tree-row {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .tree-prefix {
+      flex: 0 0 20px;
+      color: #b889ff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-weight: 900;
+    }
+
+    .tree-copy { min-width: 0; }
+    .tree-copy strong { color: #f5f9ff; font-weight: 850; }
+
+    .tree-roles {
+      display: grid;
+      gap: 3px;
+      margin: 0 0 0 10px;
+      padding: 2px 0 2px 10px;
+      border-left: 1px solid rgb(184 137 255 / 45%);
+    }
+    .research { grid-row: 2 / span 2; }
+    .extension { grid-row: 2 / span 2; }
+    .research li, .extension li { padding-block: 8px; }
+
+    .hero {
+      min-height: 0;
+      padding: 28px 34px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 0%, rgb(120 185 255 / 30%), transparent 57%),
+        linear-gradient(145deg, #164a82 0%, #102f55 48%, #0c2440 100%);
+      border: 1px solid rgb(168 212 255 / 48%);
+      border-radius: 28px;
+      box-shadow: inset 0 1px 0 rgb(255 255 255 / 25%), 0 18px 46px rgb(0 0 0 / 22%);
+    }
+
+    .hero::before, .hero::after {
+      position: absolute;
+      width: 190px;
+      height: 190px;
+      content: "";
+      border: 1px solid rgb(165 213 255 / 15%);
+      border-radius: 50%;
+    }
+
+    .hero::before { top: -118px; left: -92px; }
+    .hero::after { right: -95px; bottom: -124px; }
+    .hero h2 { position: relative; z-index: 1; font-size: clamp(34px, 3.25vw, 55px); text-shadow: 0 3px 16px rgb(0 0 0 / 16%); }
+    .hero strong { margin-top: 10px; font-size: clamp(25px, 2.12vw, 39px); }
+    .hero p { position: relative; z-index: 1; margin-top: 16px; color: #b8d9ff; font-size: clamp(14px, 1.2vw, 18px); letter-spacing: .04em; }
+
+    .experiment {
+      padding: 20px 25px 14px;
+      background: linear-gradient(145deg, rgb(14 61 62 / 91%), rgb(8 33 43 / 93%));
+    }
+
+    .experiment .node-head { margin-bottom: 9px; }
+    .experiment .icon-disc { color: #62e5b7; background: transparent; border: 0; }
+    .experiment .node-head h2 { color: #e6fff5; }
+    .flow-steps { margin-top: 3px; }
+    .flow-step { min-height: 72px; color: #d9f2e8; border-color: rgb(139 241 195 / 17%); font-size: 12px; font-weight: 700; line-height: 1.35; }
+    .flow-step .icon { width: 23px; height: 23px; color: #62e5b7; }
+
+    .security {
+      padding: 20px 28px 12px;
+      background: linear-gradient(145deg, rgb(66 27 42 / 92%), rgb(34 17 35 / 94%));
+    }
+
+    .security .node-head { margin-bottom: 6px; }
+    .security .icon-disc { color: #ff8e8b; background: transparent; border: 0; }
+    .security .node-head h2 { color: #fff0f0; }
+    .security-item { min-height: 36px; color: #f9dfdf; border-color: rgb(255 180 177 / 18%); font-size: 13px; font-weight: 700; }
+    .security-item .icon { width: 25px; height: 25px; color: #ff8e8b; }
+
+    @media (max-width: 1100px) {
+      .page { width: min(100% - 20px, 900px); margin: 10px auto; padding: 42px 22px; border-radius: 20px; }
+      .map { display: flex; flex-direction: column; align-items: center; gap: 58px; }
+      .research, .extension { grid-row: auto; }
+      .node, .hero { width: fit-content; max-width: 100%; }
+      .planning { order: -2; }
+      .hero { order: -1; }
+      .research li, .extension li { padding-block: 7px; }
+    }
+
+    /* Desktop presentation mode: the whole map stays inside one 16:9 viewport. */
+    @media (min-width: 1101px) {
+      body {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+
+      .page {
+        width: var(--page-width, min(1920px, calc(100vw - 32px)));
+        min-height: 0;
+        aspect-ratio: 16 / 9;
+        margin: 16px auto;
+        padding: clamp(22px, 2.5vw, 48px);
+        display: flex;
+        flex-direction: column;
+      }
+
+      .map {
+        flex: 1;
+        min-height: 0;
+        grid-template-rows: 1.55fr 1.08fr .79fr .52fr;
+        gap: clamp(18px, 2vw, 34px) clamp(22px, 3.5vw, 70px);
+        padding-top: clamp(18px, 2vw, 36px);
+      }
+
+      .node {
+        padding: clamp(12px, 1.25vw, 22px);
+        border-radius: 16px;
+      }
+
+      .node-head {
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+
+      .icon-disc {
+        flex-basis: clamp(36px, 3vw, 48px);
+        width: clamp(36px, 3vw, 48px);
+        height: clamp(36px, 3vw, 48px);
+      }
+
+      .icon { width: clamp(30px, 2.5vw, 40px); height: clamp(30px, 2.5vw, 40px); }
+      .node h2 { font-size: clamp(18px, 1.6vw, 28px); font-weight: 900; }
+      .node li { padding-block: clamp(3px, .38vw, 6px); font-size: clamp(11px, .86vw, 14px); line-height: 1.22; }
+      .planning { padding-right: clamp(12px, 1.4vw, 24px); }
+      .planning { width: min(100%, 480px); justify-self: center; }
+      .planning { transform: translateY(-20px); }
+      .architecture { transform: translate(28px, clamp(12px, 1.2vw, 22px)); }
+      .code { transform: translate(-28px, clamp(12px, 1.2vw, 22px)); }
+      .planning li, .research li, .extension li { padding-block: clamp(3px, .38vw, 6px); }
+      .planning-tree { gap: clamp(4px, .4vw, 7px); font-size: clamp(10px, .8vw, 13px); line-height: 1.22; }
+      .tree-row { padding-block: clamp(1px, .14vw, 3px); }
+      .tree-roles { gap: clamp(3px, .32vw, 5px); margin-left: 8px; padding: 3px 0 3px 8px; }
+      .tree-prefix { flex-basis: 16px; }
+
+      .hero { width: min(100%, 570px); justify-self: center; padding: clamp(16px, 1.8vw, 28px); border-radius: 24px; }
+      .hero h2 { font-size: clamp(28px, 2.75vw, 48px); line-height: 1.06; }
+      .hero strong { margin-top: 12px; font-size: clamp(20px, 1.8vw, 32px); }
+      .hero p { margin-top: 16px; font-size: clamp(11px, .95vw, 16px); }
+
+      .experiment, .security { padding: clamp(10px, 1.2vw, 18px) clamp(14px, 1.5vw, 26px); }
+      .experiment .node-head, .security .node-head { margin-bottom: 3px; }
+      .flow-step { min-height: 0; gap: 4px; padding: 0 5px; font-size: clamp(9px, .75vw, 12px); }
+      .flow-step .icon { width: clamp(17px, 1.45vw, 23px); height: clamp(17px, 1.45vw, 23px); }
+      .security-item { min-height: 0; gap: 4px; padding: 0 3px; font-size: clamp(11px, .95vw, 16px); }
+      .security-item .icon { width: clamp(18px, 1.45vw, 24px); height: clamp(18px, 1.45vw, 24px); }
+      .security { width: 68%; justify-self: center; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
+    <!-- Phosphor Icons, Duotone weight: transparent SVG vectors with a unified visual language. -->
+    <symbol id="i-architecture" viewBox="0 0 256 256"><path d="M224,80l-96,56L32,80l96-56Z" opacity=".2"/><path d="M230.91,172A8,8,0,0,1,228,182.91l-96,56a8,8,0,0,1-8.06,0l-96-56A8,8,0,0,1,36,169.09l92,53.65,92-53.65A8,8,0,0,1,230.91,172ZM220,121.09l-92,53.65L36,121.09A8,8,0,0,0,28,134.91l96,56a8,8,0,0,0,8.06,0l96-56A8,8,0,1,0,220,121.09ZM24,80a8,8,0,0,1,4-6.91l96-56a8,8,0,0,1,8.06,0l96,56a8,8,0,0,1,0,13.82l-96,56a8,8,0,0,1-8.06,0l-96-56A8,8,0,0,1,24,80Zm23.88,0L128,126.74,208.12,80,128,33.26Z"/></symbol>
+    <symbol id="i-planning" viewBox="0 0 256 256"><path d="M216,64V192H128V64Z" opacity=".2"/><path d="M224,128a8,8,0,0,1-8,8H128a8,8,0,0,1,0-16h88A8,8,0,0,0,224,128ZM128,72h88a8,8,0,0,0,0-16H128a8,8,0,0,0,0,16Zm88,112H128a8,8,0,0,0,0,16h88a8,8,0,0,0,0-16ZM82.34,42.34,56,68.69,45.66,58.34A8,8,0,0,0,34.34,69.66l16,16a8,8,0,0,0,11.32,0l32-32A8,8,0,0,0,82.34,42.34Zm0,64L56,132.69,45.66,122.34a8,8,0,0,0-11.32,11.32l16,16a8,8,0,0,0,11.32,0l32-32a8,8,0,0,0-11.32-11.32Zm0,64L56,196.69,45.66,186.34a8,8,0,0,0-11.32,11.32l16,16a8,8,0,0,0,11.32,0l32-32a8,8,0,0,0-11.32-11.32Z"/></symbol>
+    <symbol id="i-code" viewBox="0 0 256 256"><path d="M240,128l-48,40H64L16,128,64,88H192Z" opacity=".2"/><path d="M69.12,94.15,28.5,128l40.62,33.85a8,8,0,1,1-10.24,12.29l-48-40a8,8,0,0,1,0-12.29l48-40a8,8,0,0,1,10.24,12.3Zm176,27.7-48-40a8,8,0,1,0-10.24,12.3L227.5,128l-40.62,33.85a8,8,0,1,0,10.24,12.29l48-40a8,8,0,0,0,0-12.29ZM162.73,32.48a8,8,0,0,0-10.25,4.79l-64,176a8,8,0,0,0,4.79,10.26A8.14,8.14,0,0,0,96,224a8,8,0,0,0,7.52-5.27l64-176A8,8,0,0,0,162.73,32.48Z"/></symbol>
+    <symbol id="i-research" viewBox="0 0 256 256"><path d="M136,32V136a8,8,0,0,1-8,8H80a8,8,0,0,1-8-8V32a8,8,0,0,1,8-8h48A8,8,0,0,1,136,32Z" opacity=".2"/><path d="M224,208H203.94A88.05,88.05,0,0,0,144,64.37V32a16,16,0,0,0-16-16H80A16,16,0,0,0,64,32V136a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V80.46A72,72,0,0,1,181.25,208H32a8,8,0,0,0,0,16H224a8,8,0,0,0,0-16Zm-96-72H80V32h48V136ZM72,184a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Z"/></symbol>
+    <symbol id="i-experiment" viewBox="0 0 256 256"><path d="M208,216H48a8,8,0,0,1-6.86-12.12l30.48-50.8h0c13.23-2.48,32-1.41,56.37,10.92,32.25,16.33,54.75,12.91,67.5,7.65h0l19.34,32.23A8,8,0,0,1,208,216Z" opacity=".2"/><path d="M221.69,199.77,160,96.92V40h8a8,8,0,0,0,0-16H88a8,8,0,0,0,0,16h8V96.92L34.31,199.77A16,16,0,0,0,48,224H208a16,16,0,0,0,13.72-24.23ZM110.86,103.25A7.93,7.93,0,0,0,112,99.14V40h32V99.14a7.93,7.93,0,0,0,1.14,4.11L183.36,167c-12,2.37-29.07,1.37-51.75-10.11-15.91-8.05-31.05-12.32-45.22-12.81ZM48,208l28.54-47.58c14.25-1.73,30.31,1.85,47.82,10.72,19,9.61,35,12.88,48,12.88a69.89,69.89,0,0,0,19.55-2.7L208,208Z"/></symbol>
+    <symbol id="i-extension" viewBox="0 0 256 256"><path d="M204,168a28,28,0,0,0,12-2.69V208a8,8,0,0,1-8,8H64a8,8,0,0,1-8-8V165.31a28,28,0,1,1,0-50.62V72a8,8,0,0,1,8-8h46.69a28,28,0,1,1,50.61,0H208a8,8,0,0,1,8,8v42.69A28,28,0,1,0,204,168Z" opacity=".2"/><path d="M220.27,158.54a8,8,0,0,0-7.7-.46,20,20,0,1,1,0-36.16A8,8,0,0,0,224,114.69V72a16,16,0,0,0-16-16H171.78a35.36,35.36,0,0,0,.22-4,36.15,36.15,0,0,0-11.36-26.25,36,36,0,0,0-60.55,23.63,36.56,36.56,0,0,0,.14,6.62H64A16,16,0,0,0,48,72v32.22a35.36,35.36,0,0,0-4-.22,36.12,36.12,0,0,0-26.24,11.36,35.7,35.7,0,0,0-9.69,27,36.08,36.08,0,0,0,33.31,33.6,36.56,36.56,0,0,0,6.62-.14V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V165.31A8,8,0,0,0,220.27,158.54ZM208,208H64V165.31a8,8,0,0,0-11.43-7.23,20,20,0,1,1,0-36.16A8,8,0,0,0,64,114.69V72h46.69a8,8,0,0,0,7.23-11.43,20,20,0,1,1,36.16,0A8,8,0,0,0,161.31,72H208v32.23a35.68,35.68,0,0,0-6.62-.14A36,36,0,0,0,204,176a35.36,35.36,0,0,0,4-.22Z"/></symbol>
+    <symbol id="i-security" viewBox="0 0 256 256"><path d="M216,56v56c0,96-88,120-88,120S40,208,40,112V56a8,8,0,0,1,8-8H208A8,8,0,0,1,216,56Z" opacity=".2"/><path d="M208,40H48A16,16,0,0,0,32,56v56c0,52.72,25.52,84.67,46.93,102.19,23.06,18.86,46,25.26,47,25.53a8,8,0,0,0,4.2,0c1-.27,23.91-6.67,47-25.53C198.48,196.67,224,164.72,224,112V56A16,16,0,0,0,208,40Zm0,72c0,37.07-13.66,67.16-40.6,89.42A129.3,129.3,0,0,1,128,223.62a128.25,128.25,0,0,1-38.92-21.81C61.82,179.51,48,149.3,48,112l0-56,160,0ZM82.34,141.66a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35a8,8,0,0,1,11.32,11.32l-56,56a8,8,0,0,1-11.32,0Z"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 256 256"><path d="M224,56V200a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V56a8,8,0,0,1,8-8H216A8,8,0,0,1,224,56Z" opacity=".2"/><path d="M128,128a8,8,0,0,1-3,6.25l-40,32a8,8,0,1,1-10-12.5L107.19,128,75,102.25a8,8,0,1,1,10-12.5l40,32A8,8,0,0,1,128,128Zm48,24H136a8,8,0,0,0,0,16h40a8,8,0,0,0,0-16Zm56-96V200a16,16,0,0,1-16,16H40a16,16,0,0,1-16-16V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56ZM216,200V56H40V200H216Z"/></symbol>
+    <symbol id="i-memory" viewBox="0 0 256 256"><path d="M240,124a48,48,0,0,1-32,45.27h0V176a40,40,0,0,1-80,0,40,40,0,0,1-80,0v-6.73h0a48,48,0,0,1,0-90.54V72a40,40,0,0,1,80,0,40,40,0,0,1,80,0v6.73A48,48,0,0,1,240,124Z" opacity=".2"/><path d="M248,124a56.11,56.11,0,0,0-32-50.61V72a48,48,0,0,0-88-26.49A48,48,0,0,0,40,72v1.39a56,56,0,0,0,0,101.2V176a48,48,0,0,0,88,26.49A48,48,0,0,0,216,176v-1.41A56.09,56.09,0,0,0,248,124ZM88,208a32,32,0,0,1-31.81-28.56A55.87,55.87,0,0,0,64,180h8a8,8,0,0,0,0-16H64A40,40,0,0,1,50.67,86.27,8,8,0,0,0,56,78.73V72a32,32,0,0,1,64,0v68.26A47.8,47.8,0,0,0,88,128a8,8,0,0,0,0,16,32,32,0,0,1,0,64Zm104-44h-8a8,8,0,0,0,0,16h8a55.87,55.87,0,0,0,7.81-.56A32,32,0,1,1,168,144a8,8,0,0,0,0-16,47.8,47.8,0,0,0-32,12.26V72a32,32,0,0,1,64,0v6.73a8,8,0,0,0,5.33,7.54A40,40,0,0,1,192,164Zm16-52a8,8,0,0,1-8,8h-4a36,36,0,0,1-36-36V80a8,8,0,0,1,16,0v4a20,20,0,0,0,20,20h4A8,8,0,0,1,208,112ZM60,120H56a8,8,0,0,1,0-16h4A20,20,0,0,0,80,84V80a8,8,0,0,1,16,0v4A36,36,0,0,1,60,120Z"/></symbol>
+    <symbol id="i-smoke-test" viewBox="0 0 256 256"><path d="M224,128a96,96,0,1,1-96-96A96,96,0,0,1,224,128Z" opacity=".2"/><path d="M173.66,98.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,98.34ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z"/></symbol>
+    <symbol id="i-metadata" viewBox="0 0 256 256"><path d="M216,80c0,26.51-39.4,48-88,48S40,106.51,40,80s39.4-48,88-48S216,53.49,216,80Z" opacity=".2"/><path d="M128,24C74.17,24,32,48.6,32,80v96c0,31.4,42.17,56,96,56s96-24.6,96-56V80C224,48.6,181.83,24,128,24Zm80,104c0,9.62-7.88,19.43-21.61,26.92C170.93,163.35,150.19,168,128,168s-42.93-4.65-58.39-13.08C55.88,147.43,48,137.62,48,128V111.36c17.06,15,46.23,24.64,80,24.64s62.94-9.68,80-24.64ZM69.61,53.08C85.07,44.65,105.81,40,128,40s42.93,4.65,58.39,13.08C200.12,60.57,208,70.38,208,80s-7.88,19.43-21.61,26.92C170.93,115.35,150.19,120,128,120s-42.93-4.65-58.39-13.08C55.88,99.43,48,89.62,48,80S55.88,60.57,69.61,53.08ZM186.39,202.92C170.93,211.35,150.19,216,128,216s-42.93-4.65-58.39-13.08C55.88,195.43,48,185.62,48,176V159.36c17.06,15,46.23,24.64,80,24.64s62.94-9.68,80-24.64V176C208,185.62,200.12,195.43,186.39,202.92Z"/></symbol>
+    <symbol id="i-launch" viewBox="0 0 256 256"><path d="M184,120v61.65a8,8,0,0,1-2.34,5.65l-34.35,34.35a8,8,0,0,1-13.57-4.53L128,176ZM136,72H74.35a8,8,0,0,0-5.65,2.34L34.35,108.69a8,8,0,0,0,4.53,13.57L80,128ZM40,216c37.65,0,50.69-19.69,54.56-28.18L68.18,161.44C59.69,165.31,40,178.35,40,216Z" opacity=".2"/><path d="M223.85,47.12a16,16,0,0,0-15-15c-12.58-.75-44.73.4-71.41,27.07L132.69,64H74.36A15.91,15.91,0,0,0,63,68.68L28.7,103a16,16,0,0,0,9.07,27.16l38.47,5.37,44.21,44.21,5.37,38.49a15.94,15.94,0,0,0,10.78,12.92,16.11,16.11,0,0,0,5.1.83A15.91,15.91,0,0,0,153,227.3L187.32,193A15.91,15.91,0,0,0,192,181.64V123.31l4.77-4.77C223.45,91.86,224.6,59.71,223.85,47.12ZM74.36,80h42.33L77.16,119.52,40,114.34Zm74.41-9.45a76.65,76.65,0,0,1,59.11-22.47,76.46,76.46,0,0,1-22.42,59.16L128,164.68,91.32,128ZM176,181.64,141.67,216l-5.19-37.17L176,139.31Zm-74.16,9.5C97.34,201,82.29,224,40,224a8,8,0,0,1-8-8c0-42.29,23-57.34,32.86-61.85a8,8,0,0,1,6.64,14.56c-6.43,2.93-20.62,12.36-23.12,38.91,26.55-2.5,36-16.69,38.91-23.12a8,8,0,1,1,14.56,6.64Z"/></symbol>
+    <symbol id="i-metrics" viewBox="0 0 256 256"><path d="M224,64V208H32V48H208A16,16,0,0,1,224,64Z" opacity=".2"/><path d="M232,208a8,8,0,0,1-8,8H32a8,8,0,0,1-8-8V48a8,8,0,0,1,16,0V156.69l50.34-50.35a8,8,0,0,1,11.32,0L128,132.69,180.69,80H160a8,8,0,0,1,0-16h40a8,8,0,0,1,8,8v40a8,8,0,0,1-16,0V91.31l-58.34,58.35a8,8,0,0,1-11.32,0L96,123.31l-56,56V200H224A8,8,0,0,1,232,208Z"/></symbol>
+    <symbol id="i-report" viewBox="0 0 256 256"><path d="M208,88H152V32Z" opacity=".2"/><path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-32-80a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,136Zm0,32a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,168Z"/></symbol>
+    <symbol id="i-permission" viewBox="0 0 256 256"><path d="M232,98.36C230.73,136.92,198.67,168,160.09,168a71.68,71.68,0,0,1-26.92-5.17h0L120,176H96v24H72v24H40a8,8,0,0,1-8-8V187.31a8,8,0,0,1,2.34-5.65l58.83-58.83h0A71.68,71.68,0,0,1,88,95.91c0-38.58,31.08-70.64,69.64-71.87A72,72,0,0,1,232,98.36Z" opacity=".2"/><path d="M216.57,39.43A80,80,0,0,0,83.91,120.78L28.69,176A15.86,15.86,0,0,0,24,187.31V216a16,16,0,0,0,16,16H72a8,8,0,0,0,8-8V208H96a8,8,0,0,0,8-8V184h16a8,8,0,0,0,5.66-2.34l9.56-9.57A79.73,79.73,0,0,0,160,176h.1A80,80,0,0,0,216.57,39.43ZM224,98.1c-1.09,34.09-29.75,61.86-63.89,61.9H160a63.7,63.7,0,0,1-23.65-4.51,8,8,0,0,0-8.84,1.68L116.69,168H96a8,8,0,0,0-8,8v16H72a8,8,0,0,0-8,8v16H40V187.31l58.83-58.82a8,8,0,0,0,1.68-8.84A63.72,63.72,0,0,1,96,95.92c0-34.14,27.81-62.8,61.9-63.89A64,64,0,0,1,224,98.1ZM192,76a12,12,0,1,1-12-12A12,12,0,0,1,192,76Z"/></symbol>
+    <symbol id="i-boundary" viewBox="0 0 256 256"><path d="M224,168v40H152V168ZM92.69,48H40a8,8,0,0,0-8,8V80h96L98.34,50.34A8,8,0,0,0,92.69,48Z" opacity=".2"/><path d="M224,160h-8v-4a28,28,0,0,0-56,0v4h-8a8,8,0,0,0-8,8v40a8,8,0,0,0,8,8h72a8,8,0,0,0,8-8V168A8,8,0,0,0,224,160Zm-48-4a12,12,0,0,1,24,0v4H176Zm40,44H160V176h56Zm0-128H131.31L104,44.69A15.86,15.86,0,0,0,92.69,40H40A16,16,0,0,0,24,56V200.62A15.4,15.4,0,0,0,39.38,216h73.18a8,8,0,0,0,0-16H40V88H216v16a8,8,0,0,0,16,0V88A16,16,0,0,0,216,72ZM92.69,56l16,16H40V56Z"/></symbol>
+    <symbol id="i-sandbox" viewBox="0 0 256 256"><path d="M216,56v56c0,96-88,120-88,120S40,208,40,112V56a8,8,0,0,1,8-8H208A8,8,0,0,1,216,56Z" opacity=".2"/><path d="M120,136V96a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm8,48a12,12,0,1,0-12-12A12,12,0,0,0,128,184ZM224,56v56c0,52.72-25.52,84.67-46.93,102.19-23.06,18.86-46,25.27-47,25.53a8,8,0,0,1-4.2,0c-1-.26-23.91-6.67-47-25.53C57.52,196.67,32,164.72,32,112V56A16,16,0,0,1,48,40H208A16,16,0,0,1,224,56Zm-16,0L48,56l0,56c0,37.3,13.82,67.51,41.07,89.81A128.25,128.25,0,0,0,128,223.62a129.3,129.3,0,0,0,39.41-22.2C194.34,179.16,208,149.07,208,112Z"/></symbol>
+    <symbol id="i-defense" viewBox="0 0 256 256"><path d="M224,128a96,96,0,1,1-96-96A96,96,0,0,1,224,128Z" opacity=".2"/><path d="M72,128a134.63,134.63,0,0,1-14.16,60.47,8,8,0,1,1-14.32-7.12A118.8,118.8,0,0,0,56,128,71.73,71.73,0,0,1,83,71.8,8,8,0,1,1,93,84.29,55.76,55.76,0,0,0,72,128Zm56-8a8,8,0,0,0-8,8,184.12,184.12,0,0,1-23,89.1,8,8,0,0,0,14,7.76A200.19,200.19,0,0,0,136,128,8,8,0,0,0,128,120Zm0-32a40,40,0,0,0-40,40,8,8,0,0,0,16,0,24,24,0,0,1,48,0,214.09,214.09,0,0,1-20.51,92A8,8,0,1,0,146,226.83,230,230,0,0,0,168,128,40,40,0,0,0,128,88Zm0-64A104.11,104.11,0,0,0,24,128a87.76,87.76,0,0,1-5,29.33,8,8,0,0,0,15.09,5.33A103.9,103.9,0,0,0,40,128a88,88,0,0,1,176,0,282.24,282.24,0,0,1-5.29,54.45,8,8,0,0,0,6.3,9.4,8.22,8.22,0,0,0,1.55.15,8,8,0,0,0,7.84-6.45A298.37,298.37,0,0,0,232,128,104.12,104.12,0,0,0,128,24ZM94.4,152.17A8,8,0,0,0,85,158.42a151,151,0,0,1-17.21,45.44,8,8,0,0,0,13.86,8,166.67,166.67,0,0,0,19-50.25A8,8,0,0,0,94.4,152.17ZM128,56a72.85,72.85,0,0,0-9,.56,8,8,0,0,0,2,15.87A56.08,56.08,0,0,1,184,128a252.12,252.12,0,0,1-1.92,31A8,8,0,0,0,189,168a8.39,8.39,0,0,0,1,.06,8,8,0,0,0,7.92-7,266.48,266.48,0,0,0,2-33A72.08,72.08,0,0,0,128,56Zm57.93,128.25a8,8,0,0,0-9.75,5.75c-1.46,5.69-3.15,11.4-5,17a8,8,0,0,0,5,10.13,7.88,7.88,0,0,0,2.55.42,8,8,0,0,0,7.58-5.46c2-5.92,3.79-12,5.35-18.05A8,8,0,0,0,185.94,184.26Z"/></symbol>
+    <symbol id="i-trace" viewBox="0 0 256 256"><path d="M208,96v64H48V96Z" opacity=".2"/><path d="M56,96v64a8,8,0,0,1-16,0V96a8,8,0,0,1,16,0ZM88,24a8,8,0,0,0-8,8V224a8,8,0,0,0,16,0V32A8,8,0,0,0,88,24Zm40,32a8,8,0,0,0-8,8V192a8,8,0,0,0,16,0V64A8,8,0,0,0,128,56Zm40,32a8,8,0,0,0-8,8v64a8,8,0,0,0,16,0V96A8,8,0,0,0,168,88Zm40-16a8,8,0,0,0-8,8v96a8,8,0,0,0,16,0V80A8,8,0,0,0,208,72Z"/></symbol>
+  </svg>
+
+  <main class="page">
+    <section class="map" aria-label="mini-OpenClaw 核心功能思维导图">
+      <svg class="connectors" viewBox="0 0 1700 880" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <marker id="arrow-blue" markerWidth="11" markerHeight="11" refX="9" refY="5" orient="auto"><path d="M1,1 L9,5 L1,9" fill="none" stroke="#1565d8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+          <marker id="arrow-purple" markerWidth="11" markerHeight="11" refX="9" refY="5" orient="auto"><path d="M1,1 L9,5 L1,9" fill="none" stroke="#6d36d9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+          <marker id="arrow-teal" markerWidth="11" markerHeight="11" refX="9" refY="5" orient="auto"><path d="M1,1 L9,5 L1,9" fill="none" stroke="#0e9998" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+          <marker id="arrow-orange" markerWidth="11" markerHeight="11" refX="9" refY="5" orient="auto"><path d="M1,1 L9,5 L1,9" fill="none" stroke="#f17b12" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+          <marker id="arrow-green" markerWidth="11" markerHeight="11" refX="9" refY="5" orient="auto"><path d="M1,1 L9,5 L1,9" fill="none" stroke="#21a455" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+          <marker id="arrow-cyan" markerWidth="11" markerHeight="11" refX="9" refY="5" orient="auto"><path d="M1,1 L9,5 L1,9" fill="none" stroke="#159fc1" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+          <marker id="arrow-red" markerWidth="11" markerHeight="11" refX="9" refY="5" orient="auto"><path d="M1,1 L9,5 L1,9" fill="none" stroke="#e54842" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+        </defs>
+        <path class="connector" style="--color:#1565d8" marker-end="url(#arrow-blue)" d="M273 225 C410 258 590 350 730 405"/>
+        <path class="connector" style="--color:#6d36d9" marker-end="url(#arrow-purple)" d="M850 170 L850 375"/>
+        <path class="connector" style="--color:#0e9998" marker-end="url(#arrow-teal)" d="M1427 225 C1290 258 1110 350 970 405"/>
+        <path class="connector" style="--color:#f17b12" marker-end="url(#arrow-orange)" d="M255 570 C430 545 575 500 730 465"/>
+        <path class="connector" style="--color:#21a455" marker-end="url(#arrow-green)" d="M850 665 L850 530"/>
+        <path class="connector" style="--color:#159fc1" marker-end="url(#arrow-cyan)" d="M1445 570 C1270 545 1125 500 970 465"/>
+        <path class="connector" style="--color:#e54842" marker-end="url(#arrow-red)" d="M850 735 L850 845"/>
+      </svg>
+
+      <article class="node architecture">
+        <header class="node-head"><span class="icon-disc"><svg class="icon"><use href="#i-architecture"/></svg></span><h2>基础运行架构</h2></header>
+        <ul>
+          <li><strong>CLI</strong>：任务 / 图片输入</li>
+          <li><strong>Agent Core</strong>：决策并调用工具</li>
+          <li><strong>LLM Backend</strong>：DeepSeek / Qwen</li>
+          <li><strong>Tool Layer</strong>：执行真实动作</li>
+          <li><strong>Observation</strong>：结果回传与回答</li>
+        </ul>
+      </article>
+
+      <article class="node planning">
+        <header class="node-head"><span class="icon-disc"><svg class="icon"><use href="#i-planning"/></svg></span><h2>任务规划与协作</h2></header>
+        <div class="planning-tree" aria-label="任务规划与协作层级">
+          <div class="tree-row"><span class="tree-prefix">├─</span><span class="tree-copy">复杂任务自动拆分 <strong>TODO</strong></span></div>
+          <div class="tree-row"><span class="tree-prefix">├─</span><span class="tree-copy"><strong>TODO 状态推进</strong>：pending → in_progress → completed</span></div>
+          <div class="tree-row"><span class="tree-prefix">├─</span><span class="tree-copy">按任务需要启用角色分工</span></div>
+          <div class="tree-roles">
+            <div class="tree-row"><span class="tree-prefix">├─</span><span class="tree-copy"><strong>Research Agent</strong>：文献、网页、论文证据</span></div>
+            <div class="tree-row"><span class="tree-prefix">├─</span><span class="tree-copy"><strong>Engineering Agent</strong>：代码、修改、测试、实验</span></div>
+            <div class="tree-row"><span class="tree-prefix">├─</span><span class="tree-copy"><strong>Multimodal Agent</strong>：图片、图表、报错截图</span></div>
+            <div class="tree-row"><span class="tree-prefix">└─</span><span class="tree-copy"><strong>Reviewer</strong>：检查证据、成功声明与风险</span></div>
+          </div>
+          <div class="tree-row"><span class="tree-prefix">└─</span><span class="tree-copy"><strong>主 Agent</strong>：汇总多角色结果，生成最终回答</span></div>
+        </div>
+      </article>
+
+      <article class="node code">
+        <header class="node-head"><span class="icon-disc"><svg class="icon"><use href="#i-code"/></svg></span><h2>代码理解、修改与调试</h2></header>
+        <ul>
+          <li><strong>代码库探索</strong>：glob / grep / read</li>
+          <li><strong>最小化修改</strong>：read → edit → read 验证</li>
+          <li><strong>Shell 执行</strong>：运行脚本、测试与复现命令</li>
+          <li><strong>工具失败恢复</strong>：读取错误 → 调整参数/换工具 → 重试</li>
+          <li><strong>截图调试</strong>：从终端或 IDE 报错图提取线索，再本地验证</li>
+        </ul>
+      </article>
+
+      <article class="node research">
+        <header class="node-head"><span class="icon-disc"><svg class="icon"><use href="#i-research"/></svg></span><h2>科研调研与多模态能力</h2></header>
+        <ul>
+          <li><strong>arXiv 检索</strong>：关键词、分类、日期范围</li>
+          <li><strong>网页检索</strong>：搜索、抓取、来源保留</li>
+          <li><strong>PDF解析</strong>：Marker → MarkItDown → PyPDF 降级</li>
+          <li><strong>图表理解</strong>：方法图、曲线、表格</li>
+          <li><strong>文献综述</strong>：问题、方法、实验、局限、复现风险</li>
+        </ul>
+      </article>
+
+      <section class="hero" aria-label="中心主题">
+        <h2>mini-OpenClaw<strong>科研智能体</strong></h2>
+        <p>调研 → 代码 → 实验 → 报告</p>
+      </section>
+
+      <article class="node extension">
+        <header class="node-head"><span class="icon-disc"><svg class="icon"><use href="#i-extension"/></svg></span><h2>长期工作与扩展</h2></header>
+        <ul>
+          <li><strong>跨会话记忆</strong>：保存长期项目约定</li>
+          <li><strong>Skills</strong>：按任务加载目标工作流</li>
+          <li><strong>MCP</strong>：接入外部工具</li>
+          <li><strong>微信通知</strong>：向允许列表中的固定目标发送结果</li>
+        </ul>
+      </article>
+
+      <article class="node experiment">
+        <header class="node-head"><span class="icon-disc"><svg class="icon"><use href="#i-experiment"/></svg></span><h2>可复现实验闭环</h2></header>
+        <div class="flow-steps">
+          <div class="flow-step"><svg class="icon"><use href="#i-smoke-test"/></svg><span>冒烟测试</span></div>
+          <div class="flow-step"><svg class="icon"><use href="#i-metadata"/></svg><span>准备元数据</span></div>
+          <div class="flow-step"><svg class="icon"><use href="#i-launch"/></svg><span>启动与监控</span></div>
+          <div class="flow-step"><svg class="icon"><use href="#i-metrics"/></svg><span>自动提取指标</span></div>
+          <div class="flow-step"><svg class="icon"><use href="#i-report"/></svg><span>报告与定时调度</span></div>
+        </div>
+      </article>
+
+      <article class="node security">
+        <header class="node-head"><span class="icon-disc"><svg class="icon"><use href="#i-security"/></svg></span><h2>可信运行保障</h2></header>
+        <div class="security-grid">
+          <div class="security-item"><svg class="icon"><use href="#i-permission"/></svg>权限确认</div>
+          <div class="security-item"><svg class="icon"><use href="#i-boundary"/></svg>工作目录边界</div>
+          <div class="security-item"><svg class="icon"><use href="#i-sandbox"/></svg>Shell 沙箱</div>
+          <div class="security-item"><svg class="icon"><use href="#i-defense"/></svg>注入防护</div>
+          <div class="security-item"><svg class="icon"><use href="#i-trace"/></svg>Trace 回放与诊断</div>
+        </div>
+      </article>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const syncCanvas = () => {
+        if (window.innerWidth <= 1100) return;
+        const gutter = 32;
+        const width = Math.min(1920, window.innerWidth - gutter, (window.innerHeight - gutter) * 16 / 9);
+        document.documentElement.style.setProperty('--page-width', `${Math.max(320, width)}px`);
+      };
+      window.addEventListener('resize', syncCanvas);
+      syncCanvas();
+    })();
+  </script>
+</body>
+</html>
