@@ -1,0 +1,648 @@
+{
+  "run_id": "20260716-b-kongbawa-final",
+  "repeats": 2,
+  "rows": [
+    {
+      "experiment": "B. 跨会话记忆",
+      "task": "memory",
+      "variant": "none",
+      "repetition": 1,
+      "success": true,
+      "reason": "正确回忆“空吧哇”，且未调用工具",
+      "returncode": 0,
+      "trace": "traces/ablations/core-20260716-b-kongbawa-final/memory-none-r1.jsonl",
+      "artifact": "eval/ablation_artifacts/core-20260716-b-kongbawa-final/runs/memory-none-r1",
+      "tool_names": [],
+      "todo_calls": 0,
+      "failed_todo_attempts": 0,
+      "root_trace": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 15,
+        "trace_files": 1,
+        "spans": 4,
+        "steps": 3,
+        "tool_calls": 0,
+        "prompt_tokens": 21757,
+        "completion_tokens": 42,
+        "total_tokens": 21799,
+        "cached_tokens": 17152,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0007044856
+        },
+        "estimated_cost_usd": 0.0007044856,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 2611.0,
+        "llm_duration_ms": 2606.27,
+        "tool_duration_ms": 0,
+        "aggregate_span_duration_ms": 2606.27,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 954.92,
+          "estimated_cost": 5.4012e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 5.4012e-05,
+          "turn": 2
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 897.77,
+          "estimated_cost": 0.0005899432,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0005899432,
+          "turn": 1
+        },
+        "prompt_token_series": [
+          7065,
+          7253,
+          7439
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 1,
+          "adjacent_matching_pairs": 2,
+          "adjacent_pairs": 2,
+          "adjacent_match_ratio": 1.0,
+          "stable_prefix_chars": 9662
+        }
+      },
+      "all_traces": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 15,
+        "trace_files": 1,
+        "spans": 4,
+        "steps": 3,
+        "tool_calls": 0,
+        "prompt_tokens": 21757,
+        "completion_tokens": 42,
+        "total_tokens": 21799,
+        "cached_tokens": 17152,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0007044856
+        },
+        "estimated_cost_usd": 0.0007044856,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 2611.0,
+        "llm_duration_ms": 2606.27,
+        "tool_duration_ms": 0,
+        "aggregate_span_duration_ms": 2606.27,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 954.92,
+          "estimated_cost": 5.4012e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 5.4012e-05,
+          "turn": 2
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 897.77,
+          "estimated_cost": 0.0005899432,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0005899432,
+          "turn": 1
+        },
+        "prompt_token_series": [
+          7065,
+          7253,
+          7439
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 1,
+          "adjacent_matching_pairs": 2,
+          "adjacent_pairs": 2,
+          "adjacent_match_ratio": 1.0,
+          "stable_prefix_chars": 9662
+        }
+      }
+    },
+    {
+      "experiment": "B. 跨会话记忆",
+      "task": "memory",
+      "variant": "none",
+      "repetition": 2,
+      "success": true,
+      "reason": "正确回忆“空吧哇”，且未调用工具",
+      "returncode": 0,
+      "trace": "traces/ablations/core-20260716-b-kongbawa-final/memory-none-r2.jsonl",
+      "artifact": "eval/ablation_artifacts/core-20260716-b-kongbawa-final/runs/memory-none-r2",
+      "tool_names": [],
+      "todo_calls": 0,
+      "failed_todo_attempts": 0,
+      "root_trace": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 15,
+        "trace_files": 1,
+        "spans": 4,
+        "steps": 3,
+        "tool_calls": 0,
+        "prompt_tokens": 21761,
+        "completion_tokens": 44,
+        "total_tokens": 21805,
+        "cached_tokens": 21376,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0001260728
+        },
+        "estimated_cost_usd": 0.0001260728,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 2686.0,
+        "llm_duration_ms": 2681.27,
+        "tool_duration_ms": 0,
+        "aggregate_span_duration_ms": 2681.27,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 953.26,
+          "estimated_cost": 3.70104e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 3.70104e-05,
+          "turn": 2
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 939.56,
+          "estimated_cost": 6.10904e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 6.10904e-05,
+          "turn": 3
+        },
+        "prompt_token_series": [
+          7065,
+          7253,
+          7443
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 1,
+          "adjacent_matching_pairs": 2,
+          "adjacent_pairs": 2,
+          "adjacent_match_ratio": 1.0,
+          "stable_prefix_chars": 9662
+        }
+      },
+      "all_traces": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 15,
+        "trace_files": 1,
+        "spans": 4,
+        "steps": 3,
+        "tool_calls": 0,
+        "prompt_tokens": 21761,
+        "completion_tokens": 44,
+        "total_tokens": 21805,
+        "cached_tokens": 21376,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0001260728
+        },
+        "estimated_cost_usd": 0.0001260728,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 2686.0,
+        "llm_duration_ms": 2681.27,
+        "tool_duration_ms": 0,
+        "aggregate_span_duration_ms": 2681.27,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 953.26,
+          "estimated_cost": 3.70104e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 3.70104e-05,
+          "turn": 2
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 939.56,
+          "estimated_cost": 6.10904e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 6.10904e-05,
+          "turn": 3
+        },
+        "prompt_token_series": [
+          7065,
+          7253,
+          7443
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 1,
+          "adjacent_matching_pairs": 2,
+          "adjacent_pairs": 2,
+          "adjacent_match_ratio": 1.0,
+          "stable_prefix_chars": 9662
+        }
+      }
+    },
+    {
+      "experiment": "B. 跨会话记忆",
+      "task": "memory",
+      "variant": "no-memory",
+      "repetition": 1,
+      "success": false,
+      "reason": "最终回答未正确回忆“空吧哇”",
+      "returncode": 0,
+      "trace": "traces/ablations/core-20260716-b-kongbawa-final/memory-no-memory-r1.jsonl",
+      "artifact": "eval/ablation_artifacts/core-20260716-b-kongbawa-final/runs/memory-no-memory-r1",
+      "tool_names": [],
+      "todo_calls": 0,
+      "failed_todo_attempts": 0,
+      "root_trace": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 15,
+        "trace_files": 1,
+        "spans": 4,
+        "steps": 3,
+        "tool_calls": 0,
+        "prompt_tokens": 21679,
+        "completion_tokens": 67,
+        "total_tokens": 21746,
+        "cached_tokens": 21248,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0001385944
+        },
+        "estimated_cost_usd": 0.0001385944,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 2737.0,
+        "llm_duration_ms": 2732.33,
+        "tool_duration_ms": 0,
+        "aggregate_span_duration_ms": 2732.33,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 1237.96,
+          "estimated_cost": 3.99504e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 3.99504e-05,
+          "turn": 2
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 546.32,
+          "estimated_cost": 6.23504e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 6.23504e-05,
+          "turn": 3
+        },
+        "prompt_token_series": [
+          7029,
+          7186,
+          7464
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 1,
+          "adjacent_matching_pairs": 2,
+          "adjacent_pairs": 2,
+          "adjacent_match_ratio": 1.0,
+          "stable_prefix_chars": 9605
+        }
+      },
+      "all_traces": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 15,
+        "trace_files": 1,
+        "spans": 4,
+        "steps": 3,
+        "tool_calls": 0,
+        "prompt_tokens": 21679,
+        "completion_tokens": 67,
+        "total_tokens": 21746,
+        "cached_tokens": 21248,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0001385944
+        },
+        "estimated_cost_usd": 0.0001385944,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 2737.0,
+        "llm_duration_ms": 2732.33,
+        "tool_duration_ms": 0,
+        "aggregate_span_duration_ms": 2732.33,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 1237.96,
+          "estimated_cost": 3.99504e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 3.99504e-05,
+          "turn": 2
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 546.32,
+          "estimated_cost": 6.23504e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 6.23504e-05,
+          "turn": 3
+        },
+        "prompt_token_series": [
+          7029,
+          7186,
+          7464
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 1,
+          "adjacent_matching_pairs": 2,
+          "adjacent_pairs": 2,
+          "adjacent_match_ratio": 1.0,
+          "stable_prefix_chars": 9605
+        }
+      }
+    },
+    {
+      "experiment": "B. 跨会话记忆",
+      "task": "memory",
+      "variant": "no-memory",
+      "repetition": 2,
+      "success": false,
+      "reason": "最终回答未正确回忆“空吧哇”",
+      "returncode": 0,
+      "trace": "traces/ablations/core-20260716-b-kongbawa-final/memory-no-memory-r2.jsonl",
+      "artifact": "eval/ablation_artifacts/core-20260716-b-kongbawa-final/runs/memory-no-memory-r2",
+      "tool_names": [],
+      "todo_calls": 0,
+      "failed_todo_attempts": 0,
+      "root_trace": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 15,
+        "trace_files": 1,
+        "spans": 4,
+        "steps": 3,
+        "tool_calls": 0,
+        "prompt_tokens": 21701,
+        "completion_tokens": 102,
+        "total_tokens": 21803,
+        "cached_tokens": 21248,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0001514744
+        },
+        "estimated_cost_usd": 0.0001514744,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 3436.0,
+        "llm_duration_ms": 3430.36,
+        "tool_duration_ms": 0,
+        "aggregate_span_duration_ms": 3430.36,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 1571.24,
+          "estimated_cost": 4.30304e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 4.30304e-05,
+          "turn": 2
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 1157.66,
+          "estimated_cost": 7.21504e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 7.21504e-05,
+          "turn": 3
+        },
+        "prompt_token_series": [
+          7029,
+          7186,
+          7486
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 1,
+          "adjacent_matching_pairs": 2,
+          "adjacent_pairs": 2,
+          "adjacent_match_ratio": 1.0,
+          "stable_prefix_chars": 9605
+        }
+      },
+      "all_traces": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 15,
+        "trace_files": 1,
+        "spans": 4,
+        "steps": 3,
+        "tool_calls": 0,
+        "prompt_tokens": 21701,
+        "completion_tokens": 102,
+        "total_tokens": 21803,
+        "cached_tokens": 21248,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0001514744
+        },
+        "estimated_cost_usd": 0.0001514744,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 3436.0,
+        "llm_duration_ms": 3430.36,
+        "tool_duration_ms": 0,
+        "aggregate_span_duration_ms": 3430.36,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 1571.24,
+          "estimated_cost": 4.30304e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 4.30304e-05,
+          "turn": 2
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 1157.66,
+          "estimated_cost": 7.21504e-05,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 7.21504e-05,
+          "turn": 3
+        },
+        "prompt_token_series": [
+          7029,
+          7186,
+          7486
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 1,
+          "adjacent_matching_pairs": 2,
+          "adjacent_pairs": 2,
+          "adjacent_match_ratio": 1.0,
+          "stable_prefix_chars": 9605
+        }
+      }
+    }
+  ],
+  "aggregate": [
+    {
+      "experiment": "B. 跨会话记忆",
+      "task": "memory",
+      "variant": "none",
+      "n": 2,
+      "success_rate": 1.0,
+      "avg_tool_calls": 0.0,
+      "avg_total_tokens": 21802.0,
+      "avg_duration_ms": 2648.5,
+      "avg_todo_calls": 0.0,
+      "child_trace_runs": 0
+    },
+    {
+      "experiment": "B. 跨会话记忆",
+      "task": "memory",
+      "variant": "no-memory",
+      "n": 2,
+      "success_rate": 0.0,
+      "avg_tool_calls": 0.0,
+      "avg_total_tokens": 21774.5,
+      "avg_duration_ms": 3086.5,
+      "avg_todo_calls": 0.0,
+      "child_trace_runs": 0
+    }
+  ]
+}

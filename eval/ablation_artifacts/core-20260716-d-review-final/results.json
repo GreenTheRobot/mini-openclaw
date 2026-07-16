@@ -1,0 +1,691 @@
+{
+  "run_id": "20260716-d-review-final",
+  "repeats": 2,
+  "rows": [
+    {
+      "experiment": "D4. 多 Agent 协作（冲突证据审查任务）",
+      "task": "multiagent_review",
+      "variant": "multi-agent",
+      "repetition": 1,
+      "success": true,
+      "reason": "最终回答与代码和限制证据一致",
+      "returncode": 0,
+      "trace": "traces/ablations/core-20260716-d-review-final/multiagent_review-multi-agent-r1.jsonl",
+      "artifact": "eval/ablation_artifacts/core-20260716-d-review-final/runs/multiagent_review-multi-agent-r1",
+      "tool_names": [
+        "glob",
+        "glob",
+        "read",
+        "read",
+        "read",
+        "read",
+        "glob",
+        "read",
+        "bash",
+        "bash",
+        "bash",
+        "glob",
+        "glob",
+        "read",
+        "read",
+        "read",
+        "bash",
+        "glob",
+        "read",
+        "glob",
+        "read",
+        "bash",
+        "bash",
+        "bash"
+      ],
+      "todo_calls": 0,
+      "failed_todo_attempts": 0,
+      "root_trace": {
+        "run_status": "unknown",
+        "run_reason": "",
+        "events": 3,
+        "trace_files": 1,
+        "spans": 0,
+        "steps": 0,
+        "tool_calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "cached_tokens": 0,
+        "pricing": {
+          "status": "unpriced",
+          "models": {}
+        },
+        "estimated_cost_by_currency": {},
+        "estimated_cost_usd": null,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 0,
+        "llm_duration_ms": 0,
+        "tool_duration_ms": 0,
+        "aggregate_span_duration_ms": 0,
+        "slowest_span": null,
+        "priciest_span": null,
+        "prompt_token_series": [],
+        "prefix_cache": {
+          "available": false,
+          "unique_stable_prefixes": 0,
+          "adjacent_matching_pairs": 0,
+          "adjacent_pairs": 0,
+          "adjacent_match_ratio": null,
+          "stable_prefix_chars": 0
+        }
+      },
+      "all_traces": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 156,
+        "trace_files": 3,
+        "spans": 49,
+        "steps": 23,
+        "tool_calls": 24,
+        "prompt_tokens": 144598,
+        "completion_tokens": 6955,
+        "total_tokens": 151553,
+        "cached_tokens": 134784,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0036987552
+        },
+        "estimated_cost_usd": 0.0036987552,
+        "estimated_cost_cny": null,
+        "errors": 5,
+        "duration_ms": 67778.0,
+        "llm_duration_ms": 67488.04,
+        "tool_duration_ms": 235.76,
+        "aggregate_span_duration_ms": 67723.8,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 13182.27,
+          "estimated_cost": 0.0006477184,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0006477184,
+          "turn": 12
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 9733.51,
+          "estimated_cost": 0.000926044,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.000926044,
+          "turn": 13
+        },
+        "prompt_token_series": [
+          5693,
+          5830,
+          6162,
+          6237,
+          6306,
+          6439,
+          6573,
+          6639,
+          7805,
+          10347,
+          4609,
+          4759,
+          4993,
+          5102,
+          5161,
+          5276,
+          5337,
+          5406,
+          5507,
+          5599,
+          5693,
+          7798,
+          11327
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 2,
+          "adjacent_matching_pairs": 21,
+          "adjacent_pairs": 22,
+          "adjacent_match_ratio": 0.955,
+          "stable_prefix_chars": 6564
+        }
+      }
+    },
+    {
+      "experiment": "D4. 多 Agent 协作（冲突证据审查任务）",
+      "task": "multiagent_review",
+      "variant": "multi-agent",
+      "repetition": 2,
+      "success": true,
+      "reason": "最终回答与代码和限制证据一致",
+      "returncode": 0,
+      "trace": "traces/ablations/core-20260716-d-review-final/multiagent_review-multi-agent-r2.jsonl",
+      "artifact": "eval/ablation_artifacts/core-20260716-d-review-final/runs/multiagent_review-multi-agent-r2",
+      "tool_names": [
+        "glob",
+        "read",
+        "read",
+        "read",
+        "bash",
+        "glob",
+        "read",
+        "glob",
+        "read",
+        "bash",
+        "glob",
+        "read",
+        "read",
+        "read"
+      ],
+      "todo_calls": 0,
+      "failed_todo_attempts": 0,
+      "root_trace": {
+        "run_status": "unknown",
+        "run_reason": "",
+        "events": 2,
+        "trace_files": 1,
+        "spans": 0,
+        "steps": 0,
+        "tool_calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "cached_tokens": 0,
+        "pricing": {
+          "status": "unpriced",
+          "models": {}
+        },
+        "estimated_cost_by_currency": {},
+        "estimated_cost_usd": null,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 0,
+        "llm_duration_ms": 0,
+        "tool_duration_ms": 0,
+        "aggregate_span_duration_ms": 0,
+        "slowest_span": null,
+        "priciest_span": null,
+        "prompt_token_series": [],
+        "prefix_cache": {
+          "available": false,
+          "unique_stable_prefixes": 0,
+          "adjacent_matching_pairs": 0,
+          "adjacent_pairs": 0,
+          "adjacent_match_ratio": null,
+          "stable_prefix_chars": 0
+        }
+      },
+      "all_traces": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 101,
+        "trace_files": 3,
+        "spans": 31,
+        "steps": 15,
+        "tool_calls": 14,
+        "prompt_tokens": 92146,
+        "completion_tokens": 6596,
+        "total_tokens": 98742,
+        "cached_tokens": 83328,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0033147184
+        },
+        "estimated_cost_usd": 0.0033147184,
+        "estimated_cost_cny": null,
+        "errors": 1,
+        "duration_ms": 63252.0,
+        "llm_duration_ms": 63106.88,
+        "tool_duration_ms": 110.3,
+        "aggregate_span_duration_ms": 63217.18,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 12915.31,
+          "estimated_cost": 0.0005552848,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0005552848,
+          "turn": 9
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 12481.21,
+          "estimated_cost": 0.0009170336,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0009170336,
+          "turn": 10
+        },
+        "prompt_token_series": [
+          5710,
+          5875,
+          6139,
+          7338,
+          9713,
+          4600,
+          4699,
+          4927,
+          5037,
+          5096,
+          5211,
+          5287,
+          5356,
+          7002,
+          10156
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 2,
+          "adjacent_matching_pairs": 13,
+          "adjacent_pairs": 14,
+          "adjacent_match_ratio": 0.929,
+          "stable_prefix_chars": 6564
+        }
+      }
+    },
+    {
+      "experiment": "D4. 多 Agent 协作（冲突证据审查任务）",
+      "task": "multiagent_review",
+      "variant": "single-agent",
+      "repetition": 1,
+      "success": true,
+      "reason": "最终回答与代码和限制证据一致",
+      "returncode": 0,
+      "trace": "traces/ablations/core-20260716-d-review-final/multiagent_review-single-agent-r1.jsonl",
+      "artifact": "eval/ablation_artifacts/core-20260716-d-review-final/runs/multiagent_review-single-agent-r1",
+      "tool_names": [
+        "glob",
+        "read",
+        "read",
+        "read",
+        "bash",
+        "glob",
+        "read",
+        "read"
+      ],
+      "todo_calls": 0,
+      "failed_todo_attempts": 0,
+      "root_trace": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 54,
+        "trace_files": 1,
+        "spans": 17,
+        "steps": 8,
+        "tool_calls": 8,
+        "prompt_tokens": 77324,
+        "completion_tokens": 4553,
+        "total_tokens": 81877,
+        "cached_tokens": 67072,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0028979216
+        },
+        "estimated_cost_usd": 0.0028979216,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 42684.0,
+        "llm_duration_ms": 42574.0,
+        "tool_duration_ms": 90.82,
+        "aggregate_span_duration_ms": 42664.82,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 16895.14,
+          "estimated_cost": 0.0011178552,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0011178552,
+          "turn": 8
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 16895.14,
+          "estimated_cost": 0.0011178552,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0011178552,
+          "turn": 8
+        },
+        "prompt_token_series": [
+          8367,
+          8454,
+          8682,
+          8748,
+          9767,
+          9904,
+          10071,
+          13331
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 1,
+          "adjacent_matching_pairs": 7,
+          "adjacent_pairs": 7,
+          "adjacent_match_ratio": 1.0,
+          "stable_prefix_chars": 12730
+        }
+      },
+      "all_traces": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 54,
+        "trace_files": 1,
+        "spans": 17,
+        "steps": 8,
+        "tool_calls": 8,
+        "prompt_tokens": 77324,
+        "completion_tokens": 4553,
+        "total_tokens": 81877,
+        "cached_tokens": 67072,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0028979216
+        },
+        "estimated_cost_usd": 0.0028979216,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 42684.0,
+        "llm_duration_ms": 42574.0,
+        "tool_duration_ms": 90.82,
+        "aggregate_span_duration_ms": 42664.82,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 16895.14,
+          "estimated_cost": 0.0011178552,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0011178552,
+          "turn": 8
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 16895.14,
+          "estimated_cost": 0.0011178552,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0011178552,
+          "turn": 8
+        },
+        "prompt_token_series": [
+          8367,
+          8454,
+          8682,
+          8748,
+          9767,
+          9904,
+          10071,
+          13331
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 1,
+          "adjacent_matching_pairs": 7,
+          "adjacent_pairs": 7,
+          "adjacent_match_ratio": 1.0,
+          "stable_prefix_chars": 12730
+        }
+      }
+    },
+    {
+      "experiment": "D4. 多 Agent 协作（冲突证据审查任务）",
+      "task": "multiagent_review",
+      "variant": "single-agent",
+      "repetition": 2,
+      "success": true,
+      "reason": "最终回答与代码和限制证据一致",
+      "returncode": 0,
+      "trace": "traces/ablations/core-20260716-d-review-final/multiagent_review-single-agent-r2.jsonl",
+      "artifact": "eval/ablation_artifacts/core-20260716-d-review-final/runs/multiagent_review-single-agent-r2",
+      "tool_names": [
+        "glob",
+        "read",
+        "read",
+        "read",
+        "bash",
+        "glob",
+        "read",
+        "read"
+      ],
+      "todo_calls": 0,
+      "failed_todo_attempts": 0,
+      "root_trace": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 54,
+        "trace_files": 1,
+        "spans": 17,
+        "steps": 8,
+        "tool_calls": 8,
+        "prompt_tokens": 77554,
+        "completion_tokens": 3749,
+        "total_tokens": 81303,
+        "cached_tokens": 73344,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0018444832
+        },
+        "estimated_cost_usd": 0.0018444832,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 37859.0,
+        "llm_duration_ms": 37755.11,
+        "tool_duration_ms": 85.28,
+        "aggregate_span_duration_ms": 37840.39,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 13935.35,
+          "estimated_cost": 0.0004233936,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0004233936,
+          "turn": 7
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 12119.96,
+          "estimated_cost": 0.0008701336,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0008701336,
+          "turn": 8
+        },
+        "prompt_token_series": [
+          8367,
+          8454,
+          8682,
+          8748,
+          9883,
+          10059,
+          10226,
+          13135
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 1,
+          "adjacent_matching_pairs": 7,
+          "adjacent_pairs": 7,
+          "adjacent_match_ratio": 1.0,
+          "stable_prefix_chars": 12730
+        }
+      },
+      "all_traces": {
+        "run_status": "success",
+        "run_reason": "",
+        "events": 54,
+        "trace_files": 1,
+        "spans": 17,
+        "steps": 8,
+        "tool_calls": 8,
+        "prompt_tokens": 77554,
+        "completion_tokens": 3749,
+        "total_tokens": 81303,
+        "cached_tokens": 73344,
+        "pricing": {
+          "status": "estimated",
+          "models": {
+            "deepseek-v4-flash": {
+              "currency": "USD",
+              "input_per_million": 0.14,
+              "cache_hit_per_million": 0.0028,
+              "output_per_million": 0.28,
+              "source": "built_in",
+              "model": "deepseek-v4-flash",
+              "status": "estimated"
+            }
+          }
+        },
+        "estimated_cost_by_currency": {
+          "USD": 0.0018444832
+        },
+        "estimated_cost_usd": 0.0018444832,
+        "estimated_cost_cny": null,
+        "errors": 0,
+        "duration_ms": 37859.0,
+        "llm_duration_ms": 37755.11,
+        "tool_duration_ms": 85.28,
+        "aggregate_span_duration_ms": 37840.39,
+        "slowest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 13935.35,
+          "estimated_cost": 0.0004233936,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0004233936,
+          "turn": 7
+        },
+        "priciest_span": {
+          "kind": "llm",
+          "name": "decide",
+          "status": "ok",
+          "duration_ms": 12119.96,
+          "estimated_cost": 0.0008701336,
+          "cost_currency": "USD",
+          "estimated_cost_usd": 0.0008701336,
+          "turn": 8
+        },
+        "prompt_token_series": [
+          8367,
+          8454,
+          8682,
+          8748,
+          9883,
+          10059,
+          10226,
+          13135
+        ],
+        "prefix_cache": {
+          "available": true,
+          "unique_stable_prefixes": 1,
+          "adjacent_matching_pairs": 7,
+          "adjacent_pairs": 7,
+          "adjacent_match_ratio": 1.0,
+          "stable_prefix_chars": 12730
+        }
+      }
+    }
+  ],
+  "aggregate": [
+    {
+      "experiment": "D4. 多 Agent 协作（冲突证据审查任务）",
+      "task": "multiagent_review",
+      "variant": "multi-agent",
+      "n": 2,
+      "success_rate": 1.0,
+      "avg_tool_calls": 19.0,
+      "avg_total_tokens": 125147.5,
+      "avg_duration_ms": 65515.0,
+      "avg_todo_calls": 0.0,
+      "child_trace_runs": 2
+    },
+    {
+      "experiment": "D4. 多 Agent 协作（冲突证据审查任务）",
+      "task": "multiagent_review",
+      "variant": "single-agent",
+      "n": 2,
+      "success_rate": 1.0,
+      "avg_tool_calls": 8.0,
+      "avg_total_tokens": 81590.0,
+      "avg_duration_ms": 40271.5,
+      "avg_todo_calls": 0.0,
+      "child_trace_runs": 0
+    }
+  ],
+  "rescored_at": "2026-07-16T16:59:36"
+}
