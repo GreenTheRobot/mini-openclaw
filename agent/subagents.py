@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from agent.loop import AgentLoop, _is_insufficient_research_answer, _research_answer_repair_prompt
+from agent.loop import AgentLoop
 from agent.permissions import PermissionManager
 from agent.reviewer import review_answer, review_needs_revision
 from agent.sanitize import sanitize_for_json
@@ -419,30 +419,6 @@ def _final_delivery_answer(
     return str(response.get("content", "")).strip() or previous_answer or evidence
 
 
-def _repair_research_answer(
-    backend: Any,
-    task: str,
-    evidence: str,
-    answer: str,
-) -> str:
-    response = backend.chat([
-        {"role": "system", "content": SYNTHESIS_PROMPT},
-        {"role": "user", "content": (
-            _research_answer_repair_prompt(task, answer)
-            + "\n\n现在禁止调用工具；请只基于下面已有子 agent 输出和工具证据重写最终答案。"
-            + "如果证据中存在 URL、arXiv ID、论文页、项目页或仓库地址，必须在最终答案中保留为可点击链接。"
-            + "如果证据中确实没有来源链接，必须明确写出“未找到可点击来源链接”并说明缺口。\n\n"
-            f"已有子 agent 输出和证据：\n{evidence}"
-        )},
-    ], tools=[])
-    return str(response.get("content", "")).strip() or answer
-
-
-def _has_source_reference(text: str) -> bool:
-    lowered = text.lower()
-    return "http://" in lowered or "https://" in lowered or "arxiv:" in lowered
-
-
 def _main_agent_task(original_task: str, main_task: str) -> str:
     main_task = (main_task or original_task).strip()
     if not main_task or main_task == original_task:
@@ -671,24 +647,6 @@ def run_multi_agent(
     if event_callback is not None:
         event_callback("synthesis_start", {})
     answer = _synthesize_answer(backend, task, evidence)
-    repair_attempts = 0
-    while (
-        repair_attempts < 2
-        and _has_source_reference(evidence)
-        and _is_insufficient_research_answer(task, answer)
-    ):
-        repair_attempts += 1
-        _append_trace_event(
-            trace_path,
-            parent_run_id,
-            "final_blocked",
-            reason="insufficient_research_answer",
-            phase="synthesis",
-            attempt=repair_attempts,
-        )
-        if event_callback is not None:
-            event_callback("research_answer_repair", {"attempt": repair_attempts})
-        answer = _repair_research_answer(backend, task, evidence, answer)
     if event_callback is not None:
         event_callback("synthesis_done", {})
     reviewer_evidence = (
@@ -722,24 +680,6 @@ def run_multi_agent(
             previous_answer=answer,
             review=review,
         )
-        repair_attempts = 0
-        while (
-            repair_attempts < 2
-            and _has_source_reference(evidence)
-            and _is_insufficient_research_answer(task, answer)
-        ):
-            repair_attempts += 1
-            _append_trace_event(
-                trace_path,
-                parent_run_id,
-                "final_blocked",
-                reason="insufficient_research_answer",
-                phase="revision",
-                attempt=repair_attempts,
-            )
-            if event_callback is not None:
-                event_callback("research_answer_repair", {"phase": "revision", "attempt": repair_attempts})
-            answer = _repair_research_answer(backend, task, evidence, answer)
         if event_callback is not None:
             event_callback("review_start", {"phase": "final"})
         final_review = review_answer(backend, task, answer, reviewer_evidence)

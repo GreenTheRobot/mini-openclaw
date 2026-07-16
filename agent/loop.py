@@ -190,37 +190,6 @@ def _literature_delivery_requirements(user_task: str) -> str:
     )
 
 
-def _is_insufficient_research_answer(user_task: str, answer: str) -> bool:
-    if not _needs_research_report(user_task):
-        return False
-    lowered = answer.lower()
-    if any(hint.lower() in lowered for hint in STATUS_ONLY_ANSWER_HINTS):
-        return True
-    if len(answer.strip()) < 320:
-        return True
-    has_source_link = "http://" in lowered or "https://" in lowered or "arxiv:" in lowered
-    if _needs_literature_report(user_task):
-        covered = sum(
-            1 for group in LITERATURE_REPORT_FIELD_GROUPS
-            if any(term.lower() in lowered for term in group)
-        )
-        return not has_source_link or covered < 5
-    covered_terms = sum(1 for term in RESEARCH_REPORT_TERMS if term in lowered)
-    return not has_source_link or covered_terms < 3
-
-
-def _research_answer_repair_prompt(user_task: str, answer: str) -> str:
-    return (
-        "你刚才准备给最终答复，但该答复不满足科研智能体对调研类任务的交付要求。\n"
-        f"用户原始任务：\n{user_task}\n\n上一版答复：\n{answer}\n\n"
-        "不要只报告 task_list、历史压缩备忘、搜索流水账或下一步建议。请直接交付科研调研结果。"
-        "证据足够时整理成结构化最终报告；证据不足时明确标注缺口。\n\n"
-        "一般项目报告至少包含：项目解决的问题；官网、论文和 GitHub 来源链接；方法流程和关键思路；"
-        "创新点、局限性或适用场景；以及每项结论的信息依据。没有找到的内容必须明确说明。"
-        + _literature_delivery_requirements(user_task)
-    )
-
-
 def _mentions_successful_file_mutation(answer: str) -> bool:
     lowered = answer.lower()
     return (
@@ -510,13 +479,6 @@ class AgentLoop:
                     duration_ms=round((time.perf_counter() - started) * 1000, 2),
                     success=bool(content), note=f"summary_after_{reason}",
                 )
-            if attempt == 0 and _is_insufficient_research_answer(user_task, content):
-                messages.append({
-                    "role": "user",
-                    "content": _research_answer_repair_prompt(user_task, content)
-                    + "\n禁止继续调用工具；仅重写为合格的最终报告。",
-                })
-                continue
             break
         self.messages = messages
         self.last_run_status = "partial" if content else "failed"
@@ -579,7 +541,6 @@ class AgentLoop:
         failed_experiment_actions: list[dict[str, Any]] = []
         experiment_git_repairs = 0
         has_experiment_git_evidence = False
-        research_answer_repairs = 0
         research_tool_calls = 0
         last_compaction_turn = -3
         used_todo = any(message.get("role") == "tool" and message.get("name") in TODO_TOOL_NAMES for message in messages)
@@ -669,18 +630,6 @@ class AgentLoop:
                     self._emit("final_blocked", reason="open_todo", turn=turn + 1)
                     if self.tracer:
                         self.tracer.log_event("final_blocked", reason="open_todo", turn=turn + 1)
-                    continue
-                if research_answer_repairs < 2 and _is_insufficient_research_answer(user_task, answer):
-                    research_answer_repairs += 1
-                    messages.append({
-                        "role": "user",
-                        "content": _research_answer_repair_prompt(user_task, answer),
-                    })
-                    self._emit("final_blocked", reason="insufficient_research_answer", turn=turn + 1)
-                    if self.tracer:
-                        self.tracer.log_event(
-                            "final_blocked", reason="insufficient_research_answer", turn=turn + 1,
-                        )
                     continue
                 if (
                     _needs_experiment_tracking(user_task)

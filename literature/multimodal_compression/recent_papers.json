@@ -1,0 +1,149 @@
+{
+  "query_info": {
+    "topic": "multimodal_model_compression",
+    "search_date": "2026-07-16",
+    "date_range": "2026-07-09 to 2026-07-16",
+    "total_papers": 8
+  },
+  "papers": [
+    {
+      "title": "Direct Image-to-Modern Vietnamese Translation of Han-Nom Manuscripts via Multimodal RLHF Preference Alignment",
+      "authors": [
+        "Thi Kim Trang Vo",
+        "Nghia Hieu Nguyen",
+        "Ha Minh Tan"
+      ],
+      "date": "2026-07-13",
+      "arxiv_id": "2607.11434v1",
+      "abstract": "Translating Han-Nom manuscripts into modern Vietnamese is challenging because historical pages are often degraded, the script contains rare logographic characters, and parallel supervision is limited. We propose a multimodal RLHF preference-alignment framework that conditions Vietnamese generation on manuscript images and aligned Han-Nom source text. The model combines four streams: CLIP ViT-L/14@336 for visual features, bert-base-chinese for Han-Nom representations, vinai/phobert-base for Vietnamese representations, and T5-small encoder states. Modality-specific projections and a fusion block compress the resulting 2,048-dimensional concatenation into a shared 512-dimensional representation. Starting from the same supervised fine-tuned policy, we compare PPO, DPO, and KTO under matched work-level macro-averaged evaluation. DPO achieves the best BLEU-4, ROUGE-L, BERTScore, semantic similarity, CER, WER, and token accuracy, whereas PPO obtains the highest precision, recall, and F1. KTO remains competitive through its desirable-undesirable utility objective. All preference-aligned policies improve the BLEU-4 and semantic-similarity scores available for the SFT baseline. These results indicate that multimodal preference optimization complements supervised learning by improving lexical and semantic quality in low-resource historical translation.",
+      "compression_methods": [],
+      "pdf_url": "https://arxiv.org/pdf/2607.11434v1"
+    },
+    {
+      "title": "TIGER: Text-Conditioned Visual Gated Routing with Acceptance Alignment for Multimodal Speculative Decoding",
+      "authors": [
+        "Quynh Vo",
+        "Cong-Duy Nguyen",
+        "Ponhvoan Srey",
+        "Luu Anh Tuan",
+        "Thong Nguyen"
+      ],
+      "date": "2026-07-13",
+      "arxiv_id": "2607.11131v1",
+      "abstract": "Speculative decoding accelerates autoregressive generation by letting a lightweight drafter propose multiple tokens that are verified by a larger target model. Although effective for text-only LLMs, speculative decoding yields limited gains in VLMs because drafters often diverge on vision-critical content, while existing multimodal acceleration methods do not directly address irrelevant visual evidence or optimize the verifier-accepted prefix length that governs speedup. We propose TIGER, a Text-conditioned vIsual GatEd Routing framework for multimodal speculative decoding. TIGER dynamically selects a sparse set of context-relevant visual tokens based on the drafter's current textual state, rather than expose the full visual token set or a fixed compressed interface. To better align training with inference-time efficiency, we optimize the drafter with acceptance-aligned group-based policy training using verifier-derived rewards based on accepted prefix length, built on top of distillation warm start with KL anchoring. This encourages the drafter not only to imitate the target model, but also to produce speculative continuations that survive verification for longer prefixes. Experiments show that TIGER yields consistent gains in accepted prefix length and speculative speedup under exact verifier-side speculative decoding, while achieving favorable quality-latency trade-offs with comparable downstream accuracy in visual-routing analyses.",
+      "compression_methods": [
+        "distillation",
+        "lightweight",
+        "sparse",
+        "speculative decoding"
+      ],
+      "pdf_url": "https://arxiv.org/pdf/2607.11131v1"
+    },
+    {
+      "title": "Do We Really Need Multimodal Emotion Language Models Larger Than 1B Parameters?",
+      "authors": [
+        "Kaiwen Zheng",
+        "Junchen Fu",
+        "Wenhao Deng",
+        "Hu Han",
+        "Joemon M. Jose",
+        "Xuri Ge"
+      ],
+      "date": "2026-07-14",
+      "arxiv_id": "2607.12787v1",
+      "abstract": "Recent advances in multimodal large language models (MLLMs) have significantly improved the performance of multimodal emotion recognition (MER) and enabled interpretable description generation by jointly modeling video, audio, and language, etc. However, these performance improvements are often accompanied by an increase in model parameter size (e.g, at least 7B), which simultaneously incurs high computational costs and reduces inference efficiency, thereby hindering real-time deployment on resource-constrained platforms such as robots and mobile devices. This raises a fundamental question: do we really need the multimodal MER model larger than 1B parameters for high-quality MER?   In this paper, we challenge the assumption that larger models are inherently necessary and proposes a lightweight MER framework (called Light-MER), which achieves better and faster multimodal sentiment understanding and recognition through knowledge distillation. It can transfer knowledge from a strong, large-scale teacher model to a lightweight sub-billion-parameter student model, aiming to preserve rich multimodal emotion reasoning and recognition while substantially improving deployment efficiency. Specifically, we introduce two new optimization strategies to enhance knowledge transfer: (1) a new optimal transport loss that combines Sliced Wasserstein Distance with hidden-state alignment, and (2) a new multi-reward optimization strategy based on GRPO that balances MER performance and efficiency, aimed at further enhancing the learning capabilities of student models. Extensive experiments on nine benchmark datasets demonstrate that Light-MER achieves state-of-the-art performance while significantly improving inference efficiency. This highlights the strong potential of small multimodal emotion language models for future research. Code is available at https://github.com/GAIR-Lab/Light-MER.",
+      "compression_methods": [
+        "distillation",
+        "knowledge distillation",
+        "lightweight",
+        "deployment efficiency",
+        "inference efficiency",
+        "sub-billion"
+      ],
+      "pdf_url": "https://arxiv.org/pdf/2607.12787v1"
+    },
+    {
+      "title": "Contrasting statistical patterns in melodic and molecular evolution reveal distinctive constraints in a culturally evolving system",
+      "authors": [
+        "John M McBride",
+        "W Tecumseh Fitch"
+      ],
+      "date": "2026-07-14",
+      "arxiv_id": "2607.12673v1",
+      "abstract": "Evolved sequences can be used to infer the rules of evolution. Orally transmitted folk melodies are evolved sequences whose similarity to protein sequences (one-dimensional, drawn from a limited alphabet) invites application of bioinformatics methods to study cultural evolution. A major obstacle is that melodies encode rhythm, which breaks some assumptions of standard sequence-alignment algorithms. We develop a rhythm-aware alignment method and apply it to \\num{40000} Irish dance tune variants, enabling the first large-scale automated melodic alignment. Four canonical bioinformatics analyses -- mutability, substitution matrices, positional conservation, and covariance -- reveal patterns distinct from those of molecular evolution, revealing the forces that shape each domain: biochemical and biophysical constraints for proteins; memory, motor, and social biases for melodies. Together the results show that bioinformatics provides a powerful framework -- conceptual as much as algorithmic -- for studying cultural evolution. Although the cultural transmission of music has been discussed for centuries, here we show how to analyze it at large scale.",
+      "compression_methods": [],
+      "pdf_url": "https://arxiv.org/pdf/2607.12673v1"
+    },
+    {
+      "title": "Variable-Lattice-Density Optimization of Pin-Fin Heat Sinks under High-Reynolds-Number Flow Conditions",
+      "authors": [
+        "Yoshikatsu Furusawa",
+        "Kunitaka Shintani",
+        "Shunsuke Hirotani",
+        "Kentaro Yaji"
+      ],
+      "date": "2026-07-14",
+      "arxiv_id": "2607.12473v1",
+      "abstract": "This study extends variable-lattice-density optimization to high-Reynolds-number flows for the design of periodically arranged pin-fin heat sinks. Effective permeability and drag coefficient are identified from unit-cell Reynolds-averaged Navier--Stokes analyses of cylindrical pin-fin arrays and incorporated into a reduced model based on the Darcy--Forchheimer law for macroscopic design exploration. To enable stable optimization under high-Reynolds-number conditions, a dual-mesh framework is introduced, in which the flow field and sensitivities are evaluated on a fine mesh, whereas the design variables are updated on a coarse mesh corresponding to the unit-cell arrangement. For the base condition, the $L_2$ norm of the temperature deviation from the area-averaged temperature is decreased from 4.38 K to 1.00 K in the reduced model, and geometry-resolved analysis of the reconstructed design confirms a reduction from 5.98 K to 1.17 K. Additional calculations with higher inlet velocities and modified outlet locations show that the proposed method captures the dominant flow-redistribution trends under different operating and geometric conditions, although the thermal objective became less accurate when local solid-temperature variations became pronounced. These results indicate that the proposed approach is useful as practical design-exploration for identifying candidate pin-fin heat sink configurations under high-Reynolds-number conditions.",
+      "compression_methods": [
+        "efficient"
+      ],
+      "pdf_url": "https://arxiv.org/pdf/2607.12473v1"
+    },
+    {
+      "title": "AnchorPrune: Relevance-Anchored Contextual Expansion for Visual Token Pruning",
+      "authors": [
+        "Kyuan Oh",
+        "Bumsoo Kim"
+      ],
+      "date": "2026-07-08",
+      "arxiv_id": "2607.07033v3",
+      "abstract": "Large vision-language models incur substantial inference costs because high-resolution inputs introduce thousands of visual tokens, many of which are redundant for a given query. Existing pruning methods often combine query relevance and token diversity, yet these objectives can conflict under aggressive compression: relevance-driven selection may overconcentrate the budget on correlated local evidence, while diversity-driven selection may suppress indispensable tokens or retain distinct but uninformative regions. We introduce AnchorPrune, a training-free framework that first constructs a protected relevance anchor and then expands it with complementary visual context. AnchorPrune adaptively determines the anchor size from the novelty profile of relevance-ranked tokens, preserving a compact set of query-critical evidence, and allocates the remaining budget through importance-weighted novelty to recover informative, non-redundant context relative to the anchor. This ordered design prevents contextual expansion from displacing indispensable query cues while improving overall visual coverage. AnchorPrune is lightweight, architecture-aware, and requires neither retraining nor model modification. Across image and video vision-language models and benchmarks, it consistently improves the accuracy-efficiency trade-off over training-free baselines, particularly under severe compression. On LLaVA-NeXT-7B, AnchorPrune preserves 97.6% of full-token performance using only 160 of 2,880 visual tokens. These results establish relevance-anchored contextual expansion as an effective principle for efficient multimodal inference. Code is available at https://github.com/MULTI-cau/AnchorPrune.",
+      "compression_methods": [
+        "pruning",
+        "efficient",
+        "lightweight"
+      ],
+      "pdf_url": "https://arxiv.org/pdf/2607.07033v3"
+    },
+    {
+      "title": "When Structured Sparse Autoencoders Learn Consistent Concepts Across Modalities",
+      "authors": [
+        "Weiduo Liao",
+        "Yunqiao Yang",
+        "Ying Wei"
+      ],
+      "date": "2026-07-09",
+      "arxiv_id": "2607.08605v1",
+      "abstract": "Sparse autoencoders (SAEs) have emerged as a promising technique for mechanistic interpretability by learning a set of sparse latent features in large models, each of which encodes a distinct concept. However, in vision-language models (VLMs), vanilla SAEs struggle to learn modality-consistent concepts, with concepts often exhibiting fragmented coverage (i.e., disjoint regions) in the visual modality. To address this challenge, we propose a Structured Sparse AutoEncoder ($S^2AE$) that enforces concept consistency from both semantic and spatial perspectives in the visual modality. Specifically, we group image patches based on Transformer attention similarity and spatial proximity, and introduce a structured sparsity regularization when training the vanilla SAE. The regularization consists of exclusive sparsity for inter-group concept disentanglement and group sparsity for intra-group concept consistency, which drives the latent neurons by SAEs to specialize in distinct, semantically grounded concepts. Evaluated on the \\texttt{Qwen2.5-VL-7B-Instruct} model, the method achieves 6.06% average improvement in semantic alignment (mIoU) and 60.81 in representational efficiency (lower l0 norm) while maintaining near-perfect reconstruction fidelity with an Explained Variance above 99%. Cross-modal analysis further demonstrates that $S^2AE$ enhances neuronal monosemanticity by this visual structural prior, achieving a 3.08% average gain in semantic consistency and a 2.37% average gain in monosemanticity scores for both modalities of multimodal features, thereby fostering more coherent and disentangled representations.",
+      "compression_methods": [
+        "sparse",
+        "autoencoder",
+        "sparse autoencoder"
+      ],
+      "pdf_url": "https://arxiv.org/pdf/2607.08605v1"
+    },
+    {
+      "title": "Switch-Reasoner: Learn When to Think in Multitask Mixtures via Reinforcement Learning",
+      "authors": [
+        "Yiyang Fang",
+        "Pei Fu",
+        "Jinjie Li",
+        "Jian Liang",
+        "Wenke Huang",
+        "Ruijie Luo",
+        "Shaojie Zhang",
+        "Jian Luan",
+        "Yi R. Fung",
+        "Mang Ye"
+      ],
+      "date": "2026-07-09",
+      "arxiv_id": "2607.08572v1",
+      "abstract": "Multimodal Large Language Models (MLLMs) often follow a fixed Think-then-Answer paradigm, which is inefficient in heterogeneous multitask settings because simple inputs may not require explicit reasoning while difficult ones can benefit substantially from it. Learning when to think is also unstable during post-training, where imbalanced rollouts can drive the model toward always-thinking or always-direct behavior. We propose Switch-Reasoner, a GRPO-based framework that learns to adaptively select reasoning modes for MLLMs. It treats thinking as a virtual tool invocation and allows the model to either answer directly or invoke explicit reasoning before answering. To stabilize this decision, we introduce a dual-level regulation mechanism that balances the overall use of Thinking Mode and Direct Mode while providing sample-level supervision based on the relative benefit of the two choices. Experiments on 11 multimodal tasks show that Switch-Reasoner reduces unnecessary reasoning while maintaining strong performance, achieving a better accuracy-efficiency trade-off.",
+      "compression_methods": [
+        "efficient"
+      ],
+      "pdf_url": "https://arxiv.org/pdf/2607.08572v1"
+    }
+  ]
+}

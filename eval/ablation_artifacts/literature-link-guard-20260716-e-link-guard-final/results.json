@@ -1,0 +1,124 @@
+{
+  "run_id": "20260716-e-link-guard-final",
+  "repeats": 2,
+  "rows": [
+    {
+      "experiment": "E. 文献链接交付守卫",
+      "variant": "none",
+      "repetition": 1,
+      "success": false,
+      "reason": "最终回答没有包含本地资料给出的具体论文链接",
+      "trace": "traces/ablations/literature-link-guard-20260716-e-link-guard-final/literature-link-none-r1.jsonl",
+      "artifact": "eval/ablation_artifacts/literature-link-guard-20260716-e-link-guard-final/runs/literature-link-none-r1",
+      "evidence": {
+        "read_local_source": true,
+        "final_blocked_link_guard": 1,
+        "final_links": [],
+        "known_source_links": [],
+        "answer_chars": 4888
+      },
+      "metrics": {
+        "tool_calls": 1,
+        "total_tokens": 30605,
+        "duration_ms": 24711.0,
+        "errors": 0,
+        "estimated_cost_usd": 0.0017520776
+      }
+    },
+    {
+      "experiment": "E. 文献链接交付守卫",
+      "variant": "none",
+      "repetition": 2,
+      "success": false,
+      "reason": "最终回答没有包含本地资料给出的具体论文链接",
+      "trace": "traces/ablations/literature-link-guard-20260716-e-link-guard-final/literature-link-none-r2.jsonl",
+      "artifact": "eval/ablation_artifacts/literature-link-guard-20260716-e-link-guard-final/runs/literature-link-none-r2",
+      "evidence": {
+        "read_local_source": true,
+        "final_blocked_link_guard": 2,
+        "final_links": [],
+        "known_source_links": [],
+        "answer_chars": 5319
+      },
+      "metrics": {
+        "tool_calls": 2,
+        "total_tokens": 60962,
+        "duration_ms": 45111.0,
+        "errors": 0,
+        "estimated_cost_usd": 0.0021499968
+      }
+    },
+    {
+      "experiment": "E. 文献链接交付守卫",
+      "variant": "no-literature-link-guard",
+      "repetition": 1,
+      "success": false,
+      "reason": "最终回答没有包含本地资料给出的具体论文链接",
+      "trace": "traces/ablations/literature-link-guard-20260716-e-link-guard-final/literature-link-no-literature-link-guard-r1.jsonl",
+      "artifact": "eval/ablation_artifacts/literature-link-guard-20260716-e-link-guard-final/runs/literature-link-no-literature-link-guard-r1",
+      "evidence": {
+        "read_local_source": true,
+        "final_blocked_link_guard": 0,
+        "final_links": [],
+        "known_source_links": [],
+        "answer_chars": 4552
+      },
+      "metrics": {
+        "tool_calls": 1,
+        "total_tokens": 18115,
+        "duration_ms": 16039.0,
+        "errors": 0,
+        "estimated_cost_usd": 0.0004004504
+      }
+    },
+    {
+      "experiment": "E. 文献链接交付守卫",
+      "variant": "no-literature-link-guard",
+      "repetition": 2,
+      "success": false,
+      "reason": "最终回答没有包含本地资料给出的具体论文链接",
+      "trace": "traces/ablations/literature-link-guard-20260716-e-link-guard-final/literature-link-no-literature-link-guard-r2.jsonl",
+      "artifact": "eval/ablation_artifacts/literature-link-guard-20260716-e-link-guard-final/runs/literature-link-no-literature-link-guard-r2",
+      "evidence": {
+        "read_local_source": true,
+        "final_blocked_link_guard": 0,
+        "final_links": [],
+        "known_source_links": [],
+        "answer_chars": 3700
+      },
+      "metrics": {
+        "tool_calls": 1,
+        "total_tokens": 17895,
+        "duration_ms": 14642.0,
+        "errors": 0,
+        "estimated_cost_usd": 0.0003388504
+      }
+    }
+  ],
+  "aggregate": [
+    {
+      "variant": "none",
+      "n": 2,
+      "link_delivery_rate": 0.0,
+      "avg_known_source_links": 0.0,
+      "link_guard_blocked_runs": 2,
+      "avg_tool_calls": 1.5,
+      "avg_total_tokens": 45783.5,
+      "avg_duration_ms": 34911.0,
+      "total_trace_errors": 0,
+      "avg_estimated_cost_usd": 0.00195104
+    },
+    {
+      "variant": "no-literature-link-guard",
+      "n": 2,
+      "link_delivery_rate": 0.0,
+      "avg_known_source_links": 0.0,
+      "link_guard_blocked_runs": 0,
+      "avg_tool_calls": 1.0,
+      "avg_total_tokens": 18005.0,
+      "avg_duration_ms": 15340.5,
+      "total_trace_errors": 0,
+      "avg_estimated_cost_usd": 0.00036965
+    }
+  ]
+}
