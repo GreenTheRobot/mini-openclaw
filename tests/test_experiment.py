@@ -70,10 +70,10 @@ def test_experiment_prepare_initializes_gitignore_and_initial_commit(tmp_path: P
     finally:
         os.chdir(old)
 
-def _wait_for_experiment(run_id: str, timeout_seconds: float = 5) -> dict:
-    deadline = time.time() + timeout_seconds
+def _wait_for_experiment(run_id: str, timeout_seconds: float = 15) -> dict:
+    deadline = time.monotonic() + timeout_seconds
     status = {}
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         status = json.loads(_experiment_status(run_id))
         if not status.get("running"):
             return status

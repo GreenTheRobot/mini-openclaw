@@ -1,7 +1,10 @@
 from pathlib import Path
+import threading
+import time
 
 from PIL import Image
 
+from agent.permissions import ConfirmationResponse
 from agent.subagents import _agent_todo_path, run_multi_agent
 from tools.base import Tool, ToolRegistry
 
@@ -67,6 +70,50 @@ class ToolCallingBackend:
                 }],
             }
         return {"content": "Research Agent 已读取 paper.md。", "tool_calls": []}
+
+
+class ParallelConfirmBackend:
+    supports_tools = True
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.sent_tools: set[str] = set()
+
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        user_message = str(messages[-1].get("content", "")) if messages else ""
+        if "JSON" in system:
+            return {
+                "content": (
+                    '{"use_subagents": true, "reason": "split shell checks", "main_task": "", '
+                    '"subagents": ['
+                    '{"id": "alpha-check", "role": "engineering", "task": "run alpha shell check"},'
+                    '{"id": "beta-check", "role": "engineering", "task": "run beta shell check"}'
+                    "]}"
+                ),
+                "tool_calls": [],
+            }
+        if "Engineering Agent" in system:
+            key = "alpha" if "alpha" in user_message else "beta"
+            with self.lock:
+                sent = key in self.sent_tools
+                if not sent:
+                    self.sent_tools.add(key)
+            if not sent:
+                return {
+                    "content": "",
+                    "tool_calls": [{
+                        "id": f"call_{key}",
+                        "name": "bash",
+                        "arguments": {"command": f"echo {key}"},
+                    }],
+                }
+            return {"content": f"{key} done", "tool_calls": []}
+        if "coordinator" in system:
+            return {"content": "combined result", "tool_calls": []}
+        if "Reviewer" in system or "Reviewer" in str(messages):
+            return {"content": "review passed", "tool_calls": []}
+        return {"content": "ok", "tool_calls": []}
 
 
 class RevisionBackend(NoToolBackend):
@@ -408,9 +455,290 @@ class LinkRepairBackend(NoToolBackend):
         return {"content": "ok", "tool_calls": []}
 
 
+class ParallelBackend(NoToolBackend):
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        if "JSON" in system:
+            return {
+                "content": (
+                    '{"use_subagents": true, "reason": "needs parallel work", '
+                    '"main_task": "", "assignments": {"research": "research branch", '
+                    '"engineering": "engineering branch", "multimodal": ""}}'
+                ),
+                "tool_calls": [],
+            }
+        if "Research Agent" in system:
+            time.sleep(0.3)
+            return {"content": "research finished", "tool_calls": []}
+        if "Engineering Agent" in system:
+            time.sleep(0.3)
+            return {"content": "engineering finished", "tool_calls": []}
+        if "coordinator" in system:
+            return {"content": "parallel synthesis", "tool_calls": []}
+        if "Reviewer" in system or "Reviewer" in str(messages):
+            return {"content": "review passed.", "tool_calls": []}
+        return {"content": "ok", "tool_calls": []}
+
+
+class SameRoleFanoutBackend(NoToolBackend):
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        user = str(messages[-1].get("content", "")) if messages else ""
+        if "JSON" in system:
+            return {
+                "content": (
+                    '{"use_subagents": true, "reason": "fan out same role", '
+                    '"main_task": "", "assignments": {"research": ["inspect alpha", "inspect beta"], '
+                    '"engineering": "", "multimodal": ""}}'
+                ),
+                "tool_calls": [],
+            }
+        if "coordinator" in system:
+            return {"content": "same-role synthesis", "tool_calls": []}
+        if "Reviewer" in system or "Reviewer" in str(messages):
+            return {"content": "review passed.", "tool_calls": []}
+        if "Research Agent" in system:
+            time.sleep(0.3)
+            if "inspect alpha" in user:
+                return {"content": "alpha done", "tool_calls": []}
+            if "inspect beta" in user:
+                return {"content": "beta done", "tool_calls": []}
+            return {"content": "research done", "tool_calls": []}
+        return {"content": "ok", "tool_calls": []}
+
+
+class FlatSubagentBackend(NoToolBackend):
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        user = str(messages[-1].get("content", "")) if messages else ""
+        if "JSON" in system:
+            return {
+                "content": (
+                    '{"use_subagents": true, "reason": "flat dispatch", "main_task": "", '
+                    '"subagents": ['
+                    '{"id": "alpha-reader", "role": "research", "task": "inspect alpha only"}, '
+                    '{"id": "beta-reader", "role": "research", "task": "inspect beta only"}'
+                    ']}'
+                ),
+                "tool_calls": [],
+            }
+        if "coordinator" in system:
+            return {"content": "flat synthesis", "tool_calls": []}
+        if "Reviewer" in system or "Reviewer" in str(messages):
+            return {"content": "review passed.", "tool_calls": []}
+        if "Research Agent" in system:
+            time.sleep(0.3)
+            if "inspect alpha only" in user:
+                return {"content": "alpha flat done", "tool_calls": []}
+            if "inspect beta only" in user:
+                return {"content": "beta flat done", "tool_calls": []}
+        return {"content": "ok", "tool_calls": []}
+
+
+class DirectDispatchToolBackend(NoToolBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.saw_dispatch_tool = False
+        self.dispatched = False
+
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        user = str(messages[-1].get("content", "")) if messages else ""
+        tool_names = {tool["function"]["name"] for tool in tools or []}
+        if "JSON" in system:
+            return {
+                "content": (
+                    '{"use_subagents": false, "reason": "let main dispatch dynamically", '
+                    '"main_task": "dispatch dynamically", '
+                    '"assignments": {"research": "", "engineering": "", "multimodal": ""}}'
+                ),
+                "tool_calls": [],
+            }
+        if "Engineering Agent" in system:
+            time.sleep(0.3)
+            if "alpha" in user:
+                return {"content": "alpha via dispatch", "tool_calls": []}
+            if "beta" in user:
+                return {"content": "beta via dispatch", "tool_calls": []}
+            return {"content": "engineering via dispatch", "tool_calls": []}
+        if "subagent_dispatch" in tool_names:
+            self.saw_dispatch_tool = "subagent_dispatch" in tool_names
+            if not self.dispatched:
+                self.dispatched = True
+                return {
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "dispatch-1",
+                        "name": "subagent_dispatch",
+                        "arguments": {
+                            "reason": "parallel independent checks",
+                            "subagents": [
+                                {"id": "alpha-check", "role": "engineering", "task": "inspect alpha"},
+                                {"id": "beta-check", "role": "engineering", "task": "inspect beta"},
+                            ],
+                        },
+                    }],
+                }
+            return {"content": "main synthesized dispatch results", "tool_calls": []}
+        return {"content": "ok", "tool_calls": []}
+
+
+class LocalPathMultimodalBackend(NoToolBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.multimodal_ran = False
+
+    def chat(self, messages, tools=None):
+        system = str(messages[0].get("content", "")) if messages else ""
+        if "JSON" in system:
+            return {
+                "content": (
+                    '{"use_subagents": true, "reason": "local image path", "main_task": "", '
+                    '"subagents": ['
+                    '{"id": "figure-local", "role": "multimodal", '
+                    '"task": "analyze local image path demo_project/images/marker-001.jpeg"}'
+                    ']}'
+                ),
+                "tool_calls": [],
+            }
+        lowered_system = system.lower()
+        if "multimodal agent" in lowered_system:
+            self.multimodal_ran = True
+            return {"content": "local path multimodal done", "tool_calls": []}
+        if "coordinator" in lowered_system:
+            return {"content": "local path synthesis", "tool_calls": []}
+        if "Reviewer" in system or "Reviewer" in str(messages):
+            return {"content": "review passed.", "tool_calls": []}
+        return {"content": "ok", "tool_calls": []}
+
+
 def test_subagent_todo_paths_are_role_isolated():
     assert _agent_todo_path("parent/run", "research") != _agent_todo_path("parent/run", "engineering")
     assert ".mini-openclaw/subagents/parent-run/research/tasks.json" == _agent_todo_path("parent/run", "research")
+
+
+def test_subagents_run_in_parallel(tmp_path: Path):
+    backend = ParallelBackend()
+    events = []
+
+    started = time.monotonic()
+    answer = run_multi_agent(
+        task="parallel test",
+        backend=backend,
+        registry=ToolRegistry(),
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=tmp_path / "trace.jsonl",
+        parent_run_id="parent",
+        event_callback=lambda event, payload: events.append((event, payload)),
+    )
+    elapsed = time.monotonic() - started
+
+    assert answer == "parallel synthesis"
+    assert elapsed < 0.55
+    assert [payload["role"] for event, payload in events if event == "subagent_start"] == [
+        "Research Agent",
+        "Engineering Agent",
+    ]
+
+
+def test_same_role_assignments_fan_out_to_parallel_subagents(tmp_path: Path):
+    backend = SameRoleFanoutBackend()
+    events = []
+
+    started = time.monotonic()
+    answer = run_multi_agent(
+        task="fan out work",
+        backend=backend,
+        registry=ToolRegistry(),
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=tmp_path / "trace.jsonl",
+        parent_run_id="parent",
+        event_callback=lambda event, payload: events.append((event, payload)),
+    )
+    elapsed = time.monotonic() - started
+
+    assert answer == "same-role synthesis"
+    assert elapsed < 0.55
+    assert [payload["role"] for event, payload in events if event == "subagent_start"] == [
+        "Research Agent 1",
+        "Research Agent 2",
+    ]
+    assert (tmp_path / "subagents" / "trace.research-1.jsonl").exists()
+    assert (tmp_path / "subagents" / "trace.research-2.jsonl").exists()
+
+
+def test_flat_subagent_list_uses_role_as_attribute_not_bucket(tmp_path: Path):
+    backend = FlatSubagentBackend()
+    events = []
+
+    started = time.monotonic()
+    answer = run_multi_agent(
+        task="flat dispatch work",
+        backend=backend,
+        registry=ToolRegistry(),
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=tmp_path / "trace.jsonl",
+        parent_run_id="parent",
+        event_callback=lambda event, payload: events.append((event, payload)),
+    )
+    elapsed = time.monotonic() - started
+
+    assert answer == "flat synthesis"
+    assert elapsed < 0.55
+    starts = [payload for event, payload in events if event == "subagent_start"]
+    assert [payload["subagent_id"] for payload in starts] == ["alpha-reader", "beta-reader"]
+    assert [payload["role"] for payload in starts] == ["Research Agent 1", "Research Agent 2"]
+    assert (tmp_path / "subagents" / "trace.alpha-reader.jsonl").exists()
+    assert (tmp_path / "subagents" / "trace.beta-reader.jsonl").exists()
+
+
+def test_main_agent_can_dispatch_parallel_subagents_as_tool(tmp_path: Path):
+    backend = DirectDispatchToolBackend()
+    events = []
+    trace = tmp_path / "trace.jsonl"
+
+    started = time.monotonic()
+    answer = run_multi_agent(
+        task="dispatch from main",
+        backend=backend,
+        registry=ToolRegistry(),
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=trace,
+        parent_run_id="parent",
+        event_callback=lambda event, payload: events.append((event, payload)),
+    )
+    elapsed = time.monotonic() - started
+
+    assert answer == "main synthesized dispatch results"
+    assert backend.saw_dispatch_tool is True
+    assert elapsed < 0.55
+    starts = [payload for event, payload in events if event == "subagent_start"]
+    assert [payload["subagent_id"] for payload in starts] == ["alpha-check", "beta-check"]
+    assert '"event": "subagent_dispatch"' in trace.read_text(encoding="utf-8")
+    assert (tmp_path / "subagents" / "trace.alpha-check.jsonl").exists()
+    assert (tmp_path / "subagents" / "trace.beta-check.jsonl").exists()
+
+
+def test_local_path_multimodal_role_is_not_demoted_to_research(tmp_path: Path):
+    backend = LocalPathMultimodalBackend()
+
+    answer = run_multi_agent(
+        task="analyze local image path",
+        backend=backend,
+        registry=ToolRegistry(),
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=tmp_path / "trace.jsonl",
+        parent_run_id="parent",
+    )
+
+    assert answer == "local path synthesis"
+    assert backend.multimodal_ran is True
+    assert (tmp_path / "subagents" / "trace.figure-local.jsonl").exists()
 
 
 def test_run_multi_agent_returns_reviewed_synthesis(tmp_path: Path):
@@ -688,6 +1016,51 @@ def test_multi_agent_uses_vision_backend_only_for_images(tmp_path: Path):
 
     assert text_backend.saw_image is False
     assert vision_backend.saw_image is True
+
+
+def test_parallel_subagent_confirmations_are_serialized(tmp_path: Path):
+    backend = ParallelConfirmBackend()
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="bash",
+        description="run shell",
+        parameters={
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+        run=lambda command: f"ran {command}",
+    ))
+    state_lock = threading.Lock()
+    active = 0
+    max_active = 0
+    confirmations = 0
+
+    def confirm(_name, _arguments, _decision):
+        nonlocal active, max_active, confirmations
+        with state_lock:
+            confirmations += 1
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.1)
+        with state_lock:
+            active -= 1
+        return ConfirmationResponse(True)
+
+    run_multi_agent(
+        task="run two independent shell checks",
+        backend=backend,
+        registry=registry,
+        system_prompt="system",
+        workdir=tmp_path,
+        trace_path=tmp_path / "trace.jsonl",
+        parent_run_id="parent",
+        confirm_callback=confirm,
+    )
+
+    assert confirmations == 2
+    assert max_active == 1
 
 
 def test_reviewer_receives_subagent_tool_trace_evidence(tmp_path: Path):

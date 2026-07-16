@@ -7,6 +7,7 @@ import platform
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,8 @@ from .base import Tool, ToolResult
 from .shell import is_dangerous_command
 
 _RUN_ROOT = Path("runs")
+_ACTIVE_PROCESSES: dict[int, subprocess.Popen[Any]] = {}
+_ACTIVE_PROCESSES_LOCK = threading.Lock()
 
 _DEFAULT_GITIGNORE_LINES = [
     "runs/",
@@ -189,7 +192,17 @@ def _refresh_status(directory: Path, metadata: dict[str, Any]) -> dict[str, Any]
             returncode = int(raw_returncode)
         except ValueError:
             metadata["returncode_parse_error"] = raw_returncode
-    running = bool(metadata.get("pid")) and _pid_running(int(metadata["pid"]))
+    process_returncode: int | None = None
+    if metadata.get("pid"):
+        running, process_returncode = _poll_process(int(metadata["pid"]))
+    else:
+        running = False
+    # Prefer the live Popen handle in the process that launched the job.
+    # On Windows, os.kill(pid, 0) may briefly report an exited process as alive.
+    if returncode is None and process_returncode is not None:
+        returncode = process_returncode
+        returncode_path.write_text(str(returncode), encoding="utf-8")
+        metadata.pop("returncode_parse_error", None)
     finished = returncode is not None or (metadata.get("status") == "running" and not running)
     if returncode is not None:
         metadata["returncode"] = returncode
@@ -301,6 +314,8 @@ def _experiment_start(run_id: str) -> str:
     else:
         kwargs["start_new_session"] = True
     process = subprocess.Popen(command, **kwargs)
+    with _ACTIVE_PROCESSES_LOCK:
+        _ACTIVE_PROCESSES[process.pid] = process
     stdout.close()
     stderr.close()
     metadata.update({
@@ -317,6 +332,21 @@ def _pid_running(pid: int) -> bool:
         return True
     except OSError:
         return False
+
+
+def _poll_process(pid: int) -> tuple[bool, int | None]:
+    """Return live state and an exit code when this process launched the job."""
+    with _ACTIVE_PROCESSES_LOCK:
+        process = _ACTIVE_PROCESSES.get(pid)
+    if process is None:
+        return _pid_running(pid), None
+    returncode = process.poll()
+    if returncode is None:
+        return True, None
+    with _ACTIVE_PROCESSES_LOCK:
+        if _ACTIVE_PROCESSES.get(pid) is process:
+            _ACTIVE_PROCESSES.pop(pid, None)
+    return False, int(returncode)
 
 
 def _experiment_status(run_id: str) -> str:

@@ -1,20 +1,21 @@
 """Lightweight multi-agent orchestration built on the existing AgentLoop."""
 from __future__ import annotations
 
-import contextlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
-import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
 
-from agent.loop import AgentLoop
+from agent.loop import AgentLoop, _is_insufficient_research_answer, _research_answer_repair_prompt
 from agent.permissions import PermissionManager
 from agent.reviewer import review_answer, review_needs_revision
 from agent.sanitize import sanitize_for_json
+from agent.todo_context import todo_path
 from eval.tracer import Tracer
-from tools.base import ToolRegistry
+from tools.base import Tool, ToolRegistry, ToolResult
 
 NO_ASSIGNMENT_VALUES = {
     "", "不需要", "无需", "无", "没有", "否", "不用", "不必",
@@ -41,6 +42,36 @@ ORCHESTRATION_PROMPT = """你是主 Agent，负责把控全局，而不是亲自
 }
 
 分配要求：每个子 agent 的任务必须具体、可执行、边界清楚，并说明需要交付什么证据或产物。不要把原始任务原封不动丢给所有子 agent。"""
+
+ORCHESTRATION_PROMPT += """
+
+Dispatch model: role is only a subagent attribute used to choose that subagent's prompt.
+Do not group work by role. Dispatch a flat list of concrete subagent tasks.
+Preferred JSON shape:
+{
+  "use_subagents": true,
+  "reason": "why this needs parallel subagents",
+  "main_task": "",
+  "subagents": [
+    {"id": "paper-context", "role": "research", "task": "collect paper metadata and source context"},
+    {"id": "figure-1", "role": "multimodal", "task": "analyze only marker-001.jpeg"},
+    {"id": "figure-2", "role": "multimodal", "task": "analyze only marker-002.jpeg"}
+  ]
+}
+All items in subagents run in parallel. After their results return, the main agent receives those results
+and may dispatch another parallel wave if more work is needed.
+
+Compatibility rule: assignments may still be one string or an array of strings per role.
+Example:
+{
+  "assignments": {
+    "research": ["collect recent papers with source links", "read local docs and extract constraints"],
+    "engineering": ["inspect the implementation path", "run the focused regression tests"],
+    "multimodal": ""
+  }
+}
+Prefer multiple specific subagents over one broad subagent when the work can be split safely.
+"""
 
 RESEARCH_PROMPT = """你是 Research Agent，负责查论文、读论文、网页调研和证据整理。
 优先使用 arxiv_search、web_search、web_fetch、download_file、pdf_extract_text、paper_figure_analyze。
@@ -89,19 +120,20 @@ ENGINEERING_MARKERS = {
 
 ROLE_MAX_TURNS = 20
 MAIN_AGENT_MAX_TURNS = 40
-
-
-@contextlib.contextmanager
-def _temporary_env(name: str, value: str):
-    previous = os.environ.get(name)
-    os.environ[name] = value
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = previous
+SUBAGENT_DISPATCH_TOOL = "subagent_dispatch"
+SUBAGENT_DISPATCH_MAX_DEPTH = 3
+SUBAGENT_DISPATCH_MAX_ITEMS = 8
+_SUBAGENT_TOOL_CONTEXT = threading.local()
+SUBAGENT_TOOL_PROMPT = """
+You have a tool named `subagent_dispatch` for parallel delegation.
+Use it whenever a task can be split into independent parts, including multiple local images,
+multiple paper sections, multiple files, or multiple implementation checks.
+Dispatch a flat `subagents` list; `role` is only a prompt/capability tag and must not be used
+as a bucket. For local image or figure paths, dispatch one `multimodal` subagent per image/path
+instead of calling `paper_figure_analyze` repeatedly in the same agent.
+After `subagent_dispatch` returns, synthesize the returned results and decide whether another
+parallel wave is needed.
+"""
 
 
 def _safe_name(value: str) -> str:
@@ -118,7 +150,7 @@ def _active_assignment(value: Any) -> str:
         "not needed", "no need", "skip", "omit",
         "涓嶉渶瑕", "鏃犻渶", "涓嶇敤",
     )
-    return "" if any(marker in lowered for marker in noop_markers) else text
+    return "" if lowered in noop_markers else text
 
 
 def _wants_research(task: str) -> bool:
@@ -183,6 +215,102 @@ def _normalize_assignment(value: Any) -> str:
     return _active_assignment(text)
 
 
+def _assignment_items(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        raw_items = value
+    else:
+        raw_items = [value]
+    items: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_items:
+        text = _normalize_assignment(raw)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        items.append(text)
+    return items
+
+
+def _assignment_value(value: Any) -> str | list[str]:
+    items = _assignment_items(value)
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    return items
+
+
+def _normalize_role(value: Any) -> str:
+    role = str(value or "").strip().lower().replace("_", "-")
+    aliases = {
+        "research-agent": "research",
+        "researcher": "research",
+        "engineer": "engineering",
+        "engineering-agent": "engineering",
+        "multimodal-agent": "multimodal",
+        "vision": "multimodal",
+        "visual": "multimodal",
+    }
+    role = aliases.get(role, role)
+    return role if role in {"research", "engineering", "multimodal"} else "research"
+
+
+def _role_display_base(role: str) -> str:
+    return {
+        "research": "Research Agent",
+        "engineering": "Engineering Agent",
+        "multimodal": "Multimodal Agent",
+    }.get(role, "Subagent")
+
+
+def _normalize_subagent_specs(parsed: dict[str, Any], image_paths: list[str]) -> list[dict[str, str]]:
+    specs: list[dict[str, str]] = []
+    raw_subagents = parsed.get("subagents")
+    if isinstance(raw_subagents, list):
+        for index, item in enumerate(raw_subagents, start=1):
+            if isinstance(item, dict):
+                role = _normalize_role(item.get("role", "research"))
+                task = _normalize_assignment(item.get("task") or item.get("assignment") or item.get("work") or "")
+                raw_id = str(item.get("id") or item.get("name") or f"{role}-{index}").strip()
+            else:
+                role = "research"
+                task = _normalize_assignment(item)
+                raw_id = f"{role}-{index}"
+            if not task:
+                continue
+            specs.append({
+                "id": _safe_name(raw_id),
+                "role": role,
+                "task": task,
+                "explicit_id": "1",
+            })
+    if specs:
+        return specs
+
+    assignments = parsed.get("assignments")
+    if not isinstance(assignments, dict):
+        assignments = {}
+    for role in ("multimodal", "research", "engineering"):
+        tasks = _assignment_items(assignments.get(role, ""))
+        total = len(tasks)
+        for suffix, task in enumerate(tasks, start=1):
+            specs.append({
+                "id": _safe_name(_role_instance_name(role, suffix, total)),
+                "role": role,
+                "task": task,
+            })
+    return specs
+
+
+def _legacy_assignments_from_specs(specs: list[dict[str, str]]) -> dict[str, str | list[str]]:
+    grouped: dict[str, list[str]] = {"research": [], "engineering": [], "multimodal": []}
+    for spec in specs:
+        role = spec.get("role", "research")
+        if role in grouped:
+            grouped[role].append(spec.get("task", ""))
+    return {role: (tasks[0] if len(tasks) == 1 else tasks) if tasks else "" for role, tasks in grouped.items()}
+
+
 def _runtime_hint(system_prompt: str) -> str:
     match = RUNTIME_HINT_RE.search(system_prompt)
     return match.group(1).strip() if match else ""
@@ -210,24 +338,17 @@ def _orchestration_plan(
     parsed = _json_object(str(response.get("content", "")))
     fallback = _fallback_orchestration(task, image_paths)
     if not parsed:
-        return fallback
-    assignments = parsed.get("assignments")
-    if not isinstance(assignments, dict):
-        assignments = {}
-    normalized_assignments = {
-        "research": _normalize_assignment(assignments.get("research", "")),
-        "engineering": _normalize_assignment(assignments.get("engineering", "")),
-        "multimodal": _normalize_assignment(assignments.get("multimodal", "")),
-    }
-    if not image_paths:
-        normalized_assignments["multimodal"] = ""
+        parsed = fallback
+    specs = _normalize_subagent_specs(parsed, image_paths)
+    normalized_assignments = _legacy_assignments_from_specs(specs)
     use_subagents = bool(parsed.get("use_subagents", fallback["use_subagents"]))
-    if not any(normalized_assignments.values()):
+    if not specs:
         use_subagents = False
     return {
         "use_subagents": use_subagents,
         "reason": str(parsed.get("reason", "") or fallback["reason"]).strip(),
         "main_task": str(parsed.get("main_task", "") or task).strip(),
+        "subagents": specs,
         "assignments": normalized_assignments,
     }
 
@@ -293,6 +414,32 @@ def _role_event_callback(
     return callback
 
 
+def _locked_event_callback(
+    event_callback: Callable[[str, dict[str, Any]], None] | None,
+) -> Callable[[str, dict[str, Any]], None] | None:
+    if event_callback is None:
+        return None
+    lock = threading.Lock()
+
+    def callback(event: str, payload: dict[str, Any]) -> None:
+        with lock:
+            event_callback(event, payload)
+
+    return callback
+
+
+def _locked_confirm_callback(confirm_callback: Callable[..., Any] | None) -> Callable[..., Any] | None:
+    if confirm_callback is None:
+        return None
+    lock = threading.Lock()
+
+    def callback(*args: Any, **kwargs: Any) -> Any:
+        with lock:
+            return confirm_callback(*args, **kwargs)
+
+    return callback
+
+
 def _run_role(
     *,
     role: str,
@@ -333,8 +480,16 @@ def _run_role(
         f"主 Agent 分配给你的具体工作：\n{assigned_task}\n\n"
         f"请只完成 {role} 职责范围内的工作，并把证据、产物路径、失败原因和未完成项写清楚。"
     )
-    with _temporary_env("MINI_OPENCLAW_TODO_PATH", _agent_todo_path(parent_run_id, role)):
-        answer = loop.run(role_task, image_paths=image_paths)
+    previous_depth = getattr(_SUBAGENT_TOOL_CONTEXT, "depth", 0)
+    previous_prefix = getattr(_SUBAGENT_TOOL_CONTEXT, "prefix", "")
+    _SUBAGENT_TOOL_CONTEXT.depth = previous_depth + 1 if previous_depth else 1
+    _SUBAGENT_TOOL_CONTEXT.prefix = f"{previous_prefix}.{role}" if previous_prefix else role
+    try:
+        with todo_path(_agent_todo_path(parent_run_id, role)):
+            answer = loop.run(role_task, image_paths=image_paths)
+    finally:
+        _SUBAGENT_TOOL_CONTEXT.depth = previous_depth
+        _SUBAGENT_TOOL_CONTEXT.prefix = previous_prefix
     return answer, _trace_tool_evidence(role_trace_path, role)
 
 
@@ -356,6 +511,7 @@ def _run_main_agent(
 ) -> str:
     tracer = Tracer(_agent_trace_path(trace_path, "main"))
     manager = PermissionManager(permission_mode)
+    system_prompt = system_prompt + "\n\n" + SUBAGENT_TOOL_PROMPT
     loop = AgentLoop(
         backend,
         registry,
@@ -369,7 +525,7 @@ def _run_main_agent(
         context_budget=context_budget,
         permission_manager=manager,
     )
-    with _temporary_env("MINI_OPENCLAW_TODO_PATH", _agent_todo_path(parent_run_id, "main")):
+    with todo_path(_agent_todo_path(parent_run_id, "main")):
         return loop.run(f"{_workdir_context(workdir)}\n\n{task}", image_paths=image_paths)
 
 
@@ -419,6 +575,29 @@ def _final_delivery_answer(
     return str(response.get("content", "")).strip() or previous_answer or evidence
 
 
+def _repair_research_answer(
+    backend: Any,
+    task: str,
+    evidence: str,
+    answer: str,
+) -> str:
+    response = backend.chat([
+        {"role": "system", "content": SYNTHESIS_PROMPT},
+        {"role": "user", "content": (
+            _research_answer_repair_prompt(task, answer)
+            + "\n\n请严格依据下面的子 agent 证据重写；保留证据中的 URL、arXiv ID 和关键结论，"
+            + "不要添加证据中不存在的论文、链接或事实。只输出面向用户的最终答案。\n\n"
+            f"子 agent 证据：\n{evidence}"
+        )},
+    ], tools=[])
+    return str(response.get("content", "")).strip() or answer
+
+
+def _has_source_reference(text: str) -> bool:
+    lowered = text.lower()
+    return "http://" in lowered or "https://" in lowered or "arxiv:" in lowered
+
+
 def _main_agent_task(original_task: str, main_task: str) -> str:
     main_task = (main_task or original_task).strip()
     if not main_task or main_task == original_task:
@@ -427,6 +606,319 @@ def _main_agent_task(original_task: str, main_task: str) -> str:
         f"原始用户任务：\n{original_task}\n\n"
         f"主 Agent 决定直接执行的具体任务：\n{main_task}"
     )
+
+
+def _role_instance_name(role: str, index: int, total: int) -> str:
+    return role if total == 1 else f"{role}-{index}"
+
+
+def _display_role_name(display_role: str, index: int, total: int) -> str:
+    return display_role if total == 1 else f"{display_role} {index}"
+
+
+def _role_prompt(system_prompt: str, role: str) -> str:
+    role_prompt = {
+        "research": RESEARCH_PROMPT,
+        "engineering": ENGINEERING_PROMPT,
+        "multimodal": MULTIMODAL_PROMPT,
+    }.get(role, RESEARCH_PROMPT)
+    return system_prompt + "\n\n" + SUBAGENT_TOOL_PROMPT + "\n\n" + role_prompt
+
+
+def _dispatch_subagent_specs(
+    *,
+    subagent_specs: list[dict[str, Any]],
+    task: str,
+    backend: Any,
+    vision_backend: Any | None,
+    registry: ToolRegistry,
+    system_prompt: str,
+    workdir: Path,
+    trace_path: Path,
+    parent_run_id: str,
+    image_paths: list[str],
+    permission_mode: str,
+    auto_approve: bool,
+    confirm_callback: Callable[..., Any] | None,
+    context_budget: int,
+    event_callback: Callable[[str, dict[str, Any]], None] | None,
+    prefix_ids: bool = False,
+) -> list[dict[str, Any]]:
+    subagent_jobs: list[dict[str, Any]] = []
+    role_totals: dict[str, int] = {}
+    role_seen: dict[str, int] = {}
+    id_prefix = str(getattr(_SUBAGENT_TOOL_CONTEXT, "prefix", "") or "") if prefix_ids else ""
+
+    for spec in subagent_specs:
+        role = _normalize_role(spec.get("role", "research"))
+        role_totals[role] = role_totals.get(role, 0) + 1
+    for spec in subagent_specs:
+        role = _normalize_role(spec.get("role", "research"))
+        role_seen[role] = role_seen.get(role, 0) + 1
+        role_index = role_seen[role]
+        role_total = role_totals.get(role, 1)
+        assigned_task = _normalize_assignment(spec.get("task", ""))
+        if not assigned_task:
+            continue
+        raw_id = str(spec.get("id") or _role_instance_name(role, role_index, role_total))
+        spec_id = _safe_name(f"{id_prefix}.{raw_id}" if id_prefix else raw_id)
+        display_role = str(spec.get("display_role") or _display_role_name(_role_display_base(role), role_index, role_total))
+        include_subagent_id = bool(spec.get("explicit_id", "1"))
+
+        if role == "multimodal" and image_paths and vision_backend is None:
+            if event_callback is not None:
+                payload = {"role": display_role, "subagent_id": spec_id, "skipped": True}
+                event_callback("subagent_done", payload)
+            subagent_jobs.append({
+                "skipped": True,
+                "display_role": display_role,
+                "subagent_id": spec_id,
+                "role": role,
+                "output": "未运行：本次任务包含直接图像输入，但视觉后端不可用；未把图像转交给纯文本后端。",
+                "tool_evidence": "",
+            })
+            continue
+
+        subagent_jobs.append({
+            "display_role": display_role,
+            "subagent_id": spec_id,
+            "include_subagent_id": include_subagent_id,
+            "role": role,
+            "run_kwargs": {
+                "role": spec_id,
+                "role_prompt": _role_prompt(system_prompt, role),
+                "original_task": task,
+                "assigned_task": assigned_task,
+                "backend": vision_backend if role == "multimodal" and image_paths and vision_backend is not None else backend,
+                "registry": registry,
+                "workdir": workdir,
+                "trace_path": trace_path,
+                "parent_run_id": parent_run_id,
+                "permission_mode": permission_mode,
+                "auto_approve": auto_approve,
+                "confirm_callback": confirm_callback,
+                "context_budget": context_budget,
+                "event_callback": event_callback,
+                "image_paths": image_paths if role == "multimodal" and image_paths and vision_backend is not None else None,
+            },
+        })
+
+    results: dict[int, dict[str, Any]] = {}
+    runnable_jobs = [job for job in subagent_jobs if not job.get("skipped")]
+    for index, job in enumerate(subagent_jobs):
+        if job.get("skipped"):
+            results[index] = {
+                "id": job["subagent_id"],
+                "role": job["role"],
+                "display_role": job["display_role"],
+                "status": "skipped",
+                "answer": job["output"],
+                "tool_evidence": "",
+            }
+    if not runnable_jobs:
+        return [results[index] for index in sorted(results)]
+
+    with ThreadPoolExecutor(max_workers=len(runnable_jobs), thread_name_prefix="mini-openclaw-subagent") as executor:
+        futures = {}
+        for index, job in enumerate(subagent_jobs):
+            if job.get("skipped"):
+                continue
+            display_role = str(job["display_role"])
+            subagent_id = str(job["subagent_id"])
+            include_subagent_id = bool(job.get("include_subagent_id"))
+            run_kwargs = dict(job["run_kwargs"])
+            if event_callback is not None:
+                payload = {
+                    "role": display_role,
+                    "assignment": run_kwargs["assigned_task"],
+                }
+                if include_subagent_id:
+                    payload["subagent_id"] = subagent_id
+                event_callback("subagent_start", payload)
+            future = executor.submit(_run_role, **run_kwargs)
+            futures[future] = (index, display_role, subagent_id, str(job["role"]), include_subagent_id)
+        for future in as_completed(futures):
+            index, display_role, subagent_id, role, include_subagent_id = futures[future]
+            try:
+                output, evidence_part = future.result()
+            except Exception as exc:
+                if event_callback is not None:
+                    payload = {
+                        "role": display_role,
+                        "error": repr(exc),
+                    }
+                    if include_subagent_id:
+                        payload["subagent_id"] = subagent_id
+                    event_callback("subagent_done", payload)
+                raise
+            if event_callback is not None:
+                payload = {"role": display_role}
+                if include_subagent_id:
+                    payload["subagent_id"] = subagent_id
+                event_callback("subagent_done", payload)
+            results[index] = {
+                "id": subagent_id,
+                "role": role,
+                "display_role": display_role,
+                "status": "ok",
+                "answer": output,
+                "tool_evidence": evidence_part,
+            }
+    return [results[index] for index in sorted(results)]
+
+
+def _subagent_dispatch_tool(
+    *,
+    task: str,
+    backend: Any,
+    vision_backend: Any | None,
+    registry: ToolRegistry,
+    system_prompt: str,
+    workdir: Path,
+    trace_path: Path,
+    parent_run_id: str,
+    image_paths: list[str],
+    permission_mode: str,
+    auto_approve: bool,
+    confirm_callback: Callable[..., Any] | None,
+    context_budget: int,
+    event_callback: Callable[[str, dict[str, Any]], None] | None,
+) -> Tool:
+    def run(subagents: list[dict[str, Any]], reason: str = "") -> ToolResult:
+        current_depth = int(getattr(_SUBAGENT_TOOL_CONTEXT, "depth", 0) or 0)
+        if current_depth >= SUBAGENT_DISPATCH_MAX_DEPTH:
+            return ToolResult(
+                f"subagent_dispatch depth limit reached: {current_depth}",
+                success=False,
+                category="subagent_depth_limit",
+            )
+        if not isinstance(subagents, list) or not subagents:
+            return ToolResult("subagent_dispatch requires a non-empty subagents list", False, "invalid_arguments")
+        if len(subagents) > SUBAGENT_DISPATCH_MAX_ITEMS:
+            return ToolResult(
+                f"subagent_dispatch supports at most {SUBAGENT_DISPATCH_MAX_ITEMS} subagents per call",
+                success=False,
+                category="too_many_subagents",
+            )
+        specs = _normalize_subagent_specs({"subagents": subagents}, image_paths)
+        if not specs:
+            return ToolResult("subagent_dispatch found no runnable subagent tasks", False, "invalid_arguments")
+        _append_trace_event(
+            trace_path,
+            parent_run_id,
+            "subagent_dispatch",
+            depth=current_depth,
+            reason=reason,
+            subagents=specs,
+        )
+        results = _dispatch_subagent_specs(
+            subagent_specs=specs,
+            task=task,
+            backend=backend,
+            vision_backend=vision_backend,
+            registry=registry,
+            system_prompt=system_prompt,
+            workdir=workdir,
+            trace_path=trace_path,
+            parent_run_id=parent_run_id,
+            image_paths=image_paths,
+            permission_mode=permission_mode,
+            auto_approve=auto_approve,
+            confirm_callback=confirm_callback,
+            context_budget=context_budget,
+            event_callback=event_callback,
+            prefix_ids=True,
+        )
+        payload = {
+            "depth": current_depth,
+            "reason": reason,
+            "results": [
+                {
+                    "id": item["id"],
+                    "role": item["role"],
+                    "status": item["status"],
+                    "answer": item["answer"],
+                    "tool_evidence": item.get("tool_evidence", ""),
+                }
+                for item in results
+            ],
+        }
+        return ToolResult(json.dumps(payload, ensure_ascii=False, indent=2))
+
+    return Tool(
+        name=SUBAGENT_DISPATCH_TOOL,
+        description=(
+            "Dispatch a flat list of role-tagged subagents in parallel, wait for all results, "
+            "and return their answers. Use this for independent evidence collection, local image "
+            "or figure analysis, code inspection, experiments, or any task that benefits from parallel work."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Why this parallel dispatch is useful.",
+                },
+                "subagents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "role": {
+                                "type": "string",
+                                "enum": ["research", "engineering", "multimodal"],
+                            },
+                            "task": {"type": "string"},
+                        },
+                        "required": ["id", "role", "task"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["subagents"],
+            "additionalProperties": False,
+        },
+        run=run,
+    )
+
+
+def _registry_with_subagent_tool(
+    *,
+    registry: ToolRegistry,
+    task: str,
+    backend: Any,
+    vision_backend: Any | None,
+    system_prompt: str,
+    workdir: Path,
+    trace_path: Path,
+    parent_run_id: str,
+    image_paths: list[str],
+    permission_mode: str,
+    auto_approve: bool,
+    confirm_callback: Callable[..., Any] | None,
+    context_budget: int,
+    event_callback: Callable[[str, dict[str, Any]], None] | None,
+) -> ToolRegistry:
+    runtime_registry = ToolRegistry(dict(registry._tools))
+    runtime_registry.remove(SUBAGENT_DISPATCH_TOOL)
+    runtime_registry.register(_subagent_dispatch_tool(
+        task=task,
+        backend=backend,
+        vision_backend=vision_backend,
+        registry=runtime_registry,
+        system_prompt=system_prompt,
+        workdir=workdir,
+        trace_path=trace_path,
+        parent_run_id=parent_run_id,
+        image_paths=image_paths,
+        permission_mode=permission_mode,
+        auto_approve=auto_approve,
+        confirm_callback=confirm_callback,
+        context_budget=context_budget,
+        event_callback=event_callback,
+    ))
+    return runtime_registry
 
 
 def run_multi_agent(
@@ -450,6 +942,24 @@ def run_multi_agent(
     workdir = Path(workdir).resolve()
     trace_path = Path(trace_path)
     image_paths = image_paths or []
+    event_callback = _locked_event_callback(event_callback)
+    confirm_callback = _locked_confirm_callback(confirm_callback)
+    registry = _registry_with_subagent_tool(
+        registry=registry,
+        task=task,
+        backend=backend,
+        vision_backend=vision_backend,
+        system_prompt=system_prompt,
+        workdir=workdir,
+        trace_path=trace_path,
+        parent_run_id=parent_run_id,
+        image_paths=image_paths,
+        permission_mode=permission_mode,
+        auto_approve=auto_approve,
+        confirm_callback=confirm_callback,
+        context_budget=context_budget,
+        event_callback=event_callback,
+    )
     orchestration = _orchestration_plan(backend, task, image_paths, system_prompt, workdir)
     _append_trace_event(
         trace_path,
@@ -495,6 +1005,196 @@ def run_multi_agent(
         + json.dumps(assignments, ensure_ascii=False, indent=2),
     )]
     tool_evidence: list[str] = []
+
+    subagent_jobs: list[dict[str, Any]] = []
+    subagent_specs = list(orchestration.get("subagents") or [])
+    role_totals: dict[str, int] = {}
+    role_seen: dict[str, int] = {}
+    for spec in subagent_specs:
+        role = _normalize_role(spec.get("role", "research"))
+        role_totals[role] = role_totals.get(role, 0) + 1
+    for position, spec in enumerate(subagent_specs):
+        role = _normalize_role(spec.get("role", "research"))
+        role_seen[role] = role_seen.get(role, 0) + 1
+        role_index = role_seen[role]
+        role_total = role_totals.get(role, 1)
+        assigned_task = _normalize_assignment(spec.get("task", ""))
+        if not assigned_task:
+            continue
+        spec_id = _safe_name(str(spec.get("id") or _role_instance_name(role, role_index, role_total)))
+        display_role = str(spec.get("display_role") or _display_role_name(_role_display_base(role), role_index, role_total))
+        if role == "multimodal" and image_paths and vision_backend is None:
+            if event_callback is not None:
+                event_callback("subagent_done", {
+                    "role": display_role,
+                    "subagent_id": spec_id,
+                    "skipped": True,
+                })
+            role_outputs.append((
+                display_role,
+                "未运行：本次任务包含图像输入，但视觉后端不可用；未把图像转交给纯文本后端。",
+            ))
+            continue
+        subagent_jobs.append({
+            "display_role": display_role,
+            "subagent_id": spec_id,
+            "include_subagent_id": bool(spec.get("explicit_id")),
+            "run_kwargs": {
+                "role": spec_id,
+                "role_prompt": _role_prompt(system_prompt, role),
+                "original_task": task,
+                "assigned_task": assigned_task,
+                "backend": vision_backend if role == "multimodal" and image_paths and vision_backend is not None else backend,
+                "registry": registry,
+                "workdir": workdir,
+                "trace_path": trace_path,
+                "parent_run_id": parent_run_id,
+                "permission_mode": permission_mode,
+                "auto_approve": auto_approve,
+                "confirm_callback": confirm_callback,
+                "context_budget": context_budget,
+                "event_callback": event_callback,
+                "image_paths": image_paths if role == "multimodal" and image_paths and vision_backend is not None else None,
+            },
+        })
+    if subagent_specs:
+        assignments["multimodal"] = ""
+        assignments["research"] = ""
+        assignments["engineering"] = ""
+
+    multimodal_tasks_for_parallel = _assignment_items(assignments.get("multimodal", ""))
+    if multimodal_tasks_for_parallel and image_paths and vision_backend is None:
+        total = len(multimodal_tasks_for_parallel)
+        for index, _assigned_task in enumerate(multimodal_tasks_for_parallel, start=1):
+            display_role = _display_role_name("Multimodal Agent", index, total)
+            if event_callback is not None:
+                event_callback("subagent_done", {
+                    "role": display_role,
+                    "skipped": True,
+                })
+            role_outputs.append((
+                display_role,
+                "未运行：本次任务包含图像输入，但视觉后端不可用；未把图像转交给纯文本后端。",
+            ))
+    elif multimodal_tasks_for_parallel:
+        total = len(multimodal_tasks_for_parallel)
+        for index, assigned_task in enumerate(multimodal_tasks_for_parallel, start=1):
+            subagent_jobs.append({
+                "display_role": _display_role_name("Multimodal Agent", index, total),
+                "run_kwargs": {
+                    "role": _role_instance_name("multimodal", index, total),
+                    "role_prompt": system_prompt + "\n\n" + MULTIMODAL_PROMPT,
+                    "original_task": task,
+                    "assigned_task": assigned_task,
+                    "backend": vision_backend if image_paths and vision_backend is not None else backend,
+                    "registry": registry,
+                    "workdir": workdir,
+                    "trace_path": trace_path,
+                    "parent_run_id": parent_run_id,
+                    "permission_mode": permission_mode,
+                    "auto_approve": auto_approve,
+                    "confirm_callback": confirm_callback,
+                    "context_budget": context_budget,
+                    "event_callback": event_callback,
+                    "image_paths": image_paths if image_paths and vision_backend is not None else None,
+                },
+            })
+
+    research_tasks_for_parallel = _assignment_items(assignments.get("research", ""))
+    total = len(research_tasks_for_parallel)
+    for index, assigned_task in enumerate(research_tasks_for_parallel, start=1):
+        subagent_jobs.append({
+            "display_role": _display_role_name("Research Agent", index, total),
+            "run_kwargs": {
+                "role": _role_instance_name("research", index, total),
+                "role_prompt": system_prompt + "\n\n" + RESEARCH_PROMPT,
+                "original_task": task,
+                "assigned_task": assigned_task,
+                "backend": backend,
+                "registry": registry,
+                "workdir": workdir,
+                "trace_path": trace_path,
+                "parent_run_id": parent_run_id,
+                "permission_mode": permission_mode,
+                "auto_approve": auto_approve,
+                "confirm_callback": confirm_callback,
+                "context_budget": context_budget,
+                "event_callback": event_callback,
+            },
+        })
+
+    engineering_tasks_for_parallel = _assignment_items(assignments.get("engineering", ""))
+    total = len(engineering_tasks_for_parallel)
+    for index, assigned_task in enumerate(engineering_tasks_for_parallel, start=1):
+        subagent_jobs.append({
+            "display_role": _display_role_name("Engineering Agent", index, total),
+            "run_kwargs": {
+                "role": _role_instance_name("engineering", index, total),
+                "role_prompt": system_prompt + "\n\n" + ENGINEERING_PROMPT,
+                "original_task": task,
+                "assigned_task": assigned_task,
+                "backend": backend,
+                "registry": registry,
+                "workdir": workdir,
+                "trace_path": trace_path,
+                "parent_run_id": parent_run_id,
+                "permission_mode": permission_mode,
+                "auto_approve": auto_approve,
+                "confirm_callback": confirm_callback,
+                "context_budget": context_budget,
+                "event_callback": event_callback,
+            },
+        })
+
+    if subagent_jobs:
+        results: dict[int, tuple[str, str, str]] = {}
+        with ThreadPoolExecutor(max_workers=len(subagent_jobs), thread_name_prefix="mini-openclaw-subagent") as executor:
+            futures = {}
+            for index, job in enumerate(subagent_jobs):
+                display_role = str(job["display_role"])
+                subagent_id = str(job.get("subagent_id") or _safe_name(display_role))
+                include_subagent_id = bool(job.get("include_subagent_id"))
+                run_kwargs = dict(job["run_kwargs"])
+                if event_callback is not None:
+                    payload = {
+                        "role": display_role,
+                        "assignment": run_kwargs["assigned_task"],
+                    }
+                    if include_subagent_id:
+                        payload["subagent_id"] = subagent_id
+                    event_callback("subagent_start", payload)
+                future = executor.submit(_run_role, **run_kwargs)
+                futures[future] = (index, display_role, subagent_id, include_subagent_id)
+            for future in as_completed(futures):
+                index, display_role, subagent_id, include_subagent_id = futures[future]
+                try:
+                    output, evidence_part = future.result()
+                except Exception as exc:
+                    if event_callback is not None:
+                        payload = {
+                            "role": display_role,
+                            "error": repr(exc),
+                        }
+                        if include_subagent_id:
+                            payload["subagent_id"] = subagent_id
+                        event_callback("subagent_done", payload)
+                    raise
+                if event_callback is not None:
+                    payload = {"role": display_role}
+                    if include_subagent_id:
+                        payload["subagent_id"] = subagent_id
+                    event_callback("subagent_done", payload)
+                results[index] = (display_role, output, evidence_part)
+        for index in sorted(results):
+            display_role, output, evidence_part = results[index]
+            role_outputs.append((display_role, output))
+            if evidence_part:
+                tool_evidence.append(evidence_part)
+
+    if subagent_jobs or multimodal_tasks_for_parallel:
+        assignments["multimodal"] = ""
+        assignments["research"] = ""
+        assignments["engineering"] = ""
 
     multimodal_task = _active_assignment(assignments.get("multimodal", ""))
     if multimodal_task and image_paths and vision_backend is not None:
@@ -647,6 +1347,24 @@ def run_multi_agent(
     if event_callback is not None:
         event_callback("synthesis_start", {})
     answer = _synthesize_answer(backend, task, evidence)
+    repair_attempts = 0
+    while (
+        repair_attempts < 2
+        and _has_source_reference(evidence)
+        and _is_insufficient_research_answer(task, answer)
+    ):
+        repair_attempts += 1
+        _append_trace_event(
+            trace_path,
+            parent_run_id,
+            "final_blocked",
+            reason="insufficient_research_answer",
+            phase="synthesis",
+            attempt=repair_attempts,
+        )
+        if event_callback is not None:
+            event_callback("research_answer_repair", {"attempt": repair_attempts})
+        answer = _repair_research_answer(backend, task, evidence, answer)
     if event_callback is not None:
         event_callback("synthesis_done", {})
     reviewer_evidence = (
@@ -680,6 +1398,24 @@ def run_multi_agent(
             previous_answer=answer,
             review=review,
         )
+        repair_attempts = 0
+        while (
+            repair_attempts < 2
+            and _has_source_reference(evidence)
+            and _is_insufficient_research_answer(task, answer)
+        ):
+            repair_attempts += 1
+            _append_trace_event(
+                trace_path,
+                parent_run_id,
+                "final_blocked",
+                reason="insufficient_research_answer",
+                phase="revision",
+                attempt=repair_attempts,
+            )
+            if event_callback is not None:
+                event_callback("research_answer_repair", {"phase": "revision", "attempt": repair_attempts})
+            answer = _repair_research_answer(backend, task, evidence, answer)
         if event_callback is not None:
             event_callback("review_start", {"phase": "final"})
         final_review = review_answer(backend, task, answer, reviewer_evidence)

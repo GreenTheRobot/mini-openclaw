@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+from agent.todo_context import current_todo_path
 
 from .base import Tool
 
@@ -14,8 +15,7 @@ _ALLOWED_STATUS = {"pending", "in_progress", "completed", "failed", "blocked"}
 
 
 def _state_path() -> Path:
-    raw = os.environ.get("MINI_OPENCLAW_TODO_PATH", "").strip()
-    return Path(raw) if raw else _STATE_PATH
+    return current_todo_path(_STATE_PATH)
 
 
 def _load(path: Path | None = None) -> dict[str, Any]:

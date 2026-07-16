@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
+
+from agent.todo_context import current_todo_path
 
 
 TASK_STATE_PATH = Path(".mini-openclaw/tasks.json")
@@ -138,8 +139,7 @@ def repair_tool_protocol(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
 def _load_task_items(workdir: str | Path | None = None) -> list[dict[str, Any]]:
     if workdir is None:
         return []
-    configured = os.environ.get("MINI_OPENCLAW_TODO_PATH", "").strip()
-    path = Path(workdir) / (Path(configured) if configured else TASK_STATE_PATH)
+    path = Path(workdir) / current_todo_path(TASK_STATE_PATH)
     if not path.exists():
         return []
     try:
