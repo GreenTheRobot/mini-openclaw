@@ -2,7 +2,14 @@ from datetime import datetime, timezone
 import json
 import os
 
-from agent.cli import _build_parser, _ensure_session_todo_path, _prepare_turn_context, _print_run_status, _runtime_context
+from agent.cli import (
+    _build_parser,
+    _effective_system_prompt,
+    _ensure_session_todo_path,
+    _prepare_turn_context,
+    _print_run_status,
+    _runtime_context,
+)
 from agent.memory import Memory
 from agent.ui import EventRenderer
 
@@ -174,6 +181,34 @@ def test_turn_context_loads_latest_disk_memory(tmp_path, monkeypatch):
 
     assert any(key.startswith("project-memory:") for key in loaded)
     assert "跨会话约定：报告先写结论" in "\n".join(loaded.values())
+
+
+def test_multi_agent_effective_prompt_includes_memory_loaded_after_session_started(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Memory("MEMORY.md").write("跨会话约定：称呼用户为空吧哇")
+
+    class StartedAgent:
+        def __init__(self):
+            self.messages = [
+                {"role": "system", "content": "base system"},
+                {"role": "user", "content": "上一轮任务已经开始"},
+            ]
+            self.loaded_contexts = set()
+
+        def add_context(self, key, content):
+            self.loaded_contexts.add(key)
+            self.messages.append({
+                "role": "user",
+                "content": "[项目补充上下文：以下内容由本地配置/Skill 提供，仍受系统约束。]\n" + content,
+            })
+
+    agent = StartedAgent()
+    _prepare_turn_context(agent, "你记得我是谁吗？", [], planning=False)
+
+    effective = _effective_system_prompt(agent, "fallback")
+
+    assert "base system" in effective
+    assert "跨会话约定：称呼用户为空吧哇" in effective
 
 
 def test_cli_assigns_isolated_todo_path_when_unset(monkeypatch):

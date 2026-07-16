@@ -217,6 +217,31 @@ def _prepare_turn_context(agent: Any, task: str, skills: list[Any], planning: bo
             agent.add_context(f"skill:{skill.name}", render_skill_bodies([skill]))
 
 
+def _effective_system_prompt(agent: Any, fallback: str) -> str:
+    """Return the system prompt plus contexts loaded for this CLI agent.
+
+    The single-Agent path keeps long-term memory and selected Skills in
+    ``agent.messages``. The default multi-agent path is stateless per role, so
+    it must receive the same loaded contexts explicitly in its system prompt.
+    """
+    messages = getattr(agent, "messages", []) or []
+    if messages and messages[0].get("role") == "system":
+        base = str(messages[0].get("content", "")) or fallback
+    else:
+        base = fallback
+
+    extras: list[str] = []
+    for message in messages[1:]:
+        if message.get("role") != "user":
+            continue
+        content = str(message.get("content", ""))
+        if content.startswith("[项目补充上下文："):
+            extras.append(content)
+    if not extras:
+        return base
+    return base.rstrip() + "\n\n" + "\n\n".join(extras)
+
+
 def _audit(backend: Any, tracer: Any, task: str, answer: str, evidence: str) -> None:
     from agent.reviewer import review_answer
     review = review_answer(backend, task, answer, evidence)
@@ -400,14 +425,14 @@ def _interactive(
             if trace_action in {"", "summary"}:
                 _print(json.dumps(summarize(trace_path, include_children=True), ensure_ascii=False, indent=2))
             elif trace_action == "cost":
-                _print(json.dumps(cost_report(trace_path), ensure_ascii=False, indent=2))
+                _print(json.dumps(cost_report(trace_path, include_children=True), ensure_ascii=False, indent=2))
             elif trace_action == "diagnose":
-                _print(json.dumps(diagnose(trace_path), ensure_ascii=False, indent=2))
+                _print(json.dumps(diagnose(trace_path, include_children=True), ensure_ascii=False, indent=2))
             elif trace_action == "replay":
-                _print(render_terminal(trace_path, details=True))
+                _print(render_terminal(trace_path, details=True, include_children=True))
             elif trace_action == "html":
                 output = Path(trace_output.strip()) if trace_output.strip() else trace_path.with_suffix(".html")
-                _print(f"Trace HTML 已生成：{write_html(trace_path, output)}")
+                _print(f"Trace HTML 已生成：{write_html(trace_path, output, include_children=True)}")
             else:
                 _print("用法：/trace [summary|cost|diagnose|replay|html [输出路径]]")
             continue
@@ -455,7 +480,7 @@ def _interactive(
                     task=task,
                     backend=backend,
                     registry=registry,
-                    system_prompt=system_prompt or agent.system_prompt,
+                    system_prompt=_effective_system_prompt(agent, system_prompt or agent.system_prompt),
                     workdir=agent.workdir,
                     trace_path=trace_path,
                     parent_run_id=tracer.run_id,
@@ -626,7 +651,7 @@ def main(argv: list[str] | None = None) -> int:
             backend=backend,
             vision_backend=vision_backend,
             registry=registry,
-            system_prompt=system,
+            system_prompt=_effective_system_prompt(agent, system),
             workdir=agent.workdir,
             trace_path=trace_path,
             parent_run_id=tracer.run_id,

@@ -13,6 +13,8 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("summary", "cost", "simulate", "diagnose", "replay", "render"):
         command = sub.add_parser(name)
         command.add_argument("trace")
+        if name in {"summary", "cost", "diagnose", "replay", "render"}:
+            command.add_argument("--no-children", action="store_true", help="do not include matching subagent traces")
         if name == "replay":
             command.add_argument("--details", action="store_true")
         if name == "render":
@@ -27,22 +29,25 @@ def main(argv: list[str] | None = None) -> int:
             "simulate": simulate,
             "diagnose": diagnose,
         }
-        report = reports[args.command](args.trace)
+        if args.command in {"summary", "cost", "diagnose"}:
+            report = reports[args.command](args.trace, include_children=not args.no_children)
+        else:
+            report = reports[args.command](args.trace)
         print(json.dumps(report, ensure_ascii=False, indent=2))
     elif args.command == "replay":
-        print(render_terminal(args.trace, details=args.details))
+        print(render_terminal(args.trace, details=args.details, include_children=not args.no_children))
     elif args.format == "html":
         output = Path(args.output) if args.output else Path(args.trace).with_suffix(".html")
-        print(write_html(args.trace, output))
+        print(write_html(args.trace, output, include_children=not args.no_children))
     elif args.format == "markdown":
-        rendered = render_markdown(args.trace)
+        rendered = render_markdown(args.trace, include_children=not args.no_children)
         if args.output:
             Path(args.output).write_text(rendered, encoding="utf-8")
             print(args.output)
         else:
             print(rendered)
     else:
-        print(render_terminal(args.trace, details=True))
+        print(render_terminal(args.trace, details=True, include_children=not args.no_children))
     return 0
 
 

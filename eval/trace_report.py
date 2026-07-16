@@ -319,9 +319,9 @@ def _span_summary(span: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
-def cost_report(path: str | Path) -> dict[str, Any]:
+def cost_report(path: str | Path, include_children: bool = False) -> dict[str, Any]:
     """Return per-LLM cost rows plus the aggregate report for CLI and renderers."""
-    records = load_records(path)
+    records = _load_trace_records(path, include_children)
     spans, pricing = enrich_spans(spans_from_records(records) or _legacy_spans(records))
     llm = [span for span in spans if span.get("kind") == "llm"]
     return {
@@ -341,13 +341,13 @@ def cost_report(path: str | Path) -> dict[str, Any]:
             }
             for span in llm
         ],
-        "summary": summarize(path),
+        "summary": summarize(path, include_children=include_children),
     }
 
 
-def simulate(path: str | Path) -> dict[str, Any]:
+def simulate(path: str | Path, include_children: bool = False) -> dict[str, Any]:
     """Validate a recorded call/result sequence without invoking any tool or model."""
-    records = load_records(path)
+    records = _load_trace_records(path, include_children)
     pending: dict[str, dict[str, Any]] = {}
     issues: list[dict[str, Any]] = []
     consumed = 0
@@ -390,12 +390,12 @@ def simulate(path: str | Path) -> dict[str, Any]:
     }
 
 
-def diagnose(path: str | Path, *, slow_ms: float = 30_000) -> dict[str, Any]:
+def diagnose(path: str | Path, *, slow_ms: float = 30_000, include_children: bool = False) -> dict[str, Any]:
     """Produce deterministic debugging findings from a persisted trace."""
-    records = load_records(path)
+    records = _load_trace_records(path, include_children)
     raw_spans = spans_from_records(records) or _legacy_spans(records)
     spans, _ = enrich_spans(raw_spans)
-    summary = summarize(path)
+    summary = summarize(path, include_children=include_children)
     findings: list[dict[str, Any]] = []
     for span in spans:
         duration = float(span.get("duration_ms", 0) or 0)
@@ -442,13 +442,13 @@ def diagnose(path: str | Path, *, slow_ms: float = 30_000) -> dict[str, Any]:
     for record in records:
         if record.get("event") in {"final_blocked", "protocol_repaired", "compaction", "error_budget_exhausted"}:
             findings.append({"severity": "info", "kind": record["event"], "details": _display_safe(record)})
-    simulation = simulate(path)
+    simulation = simulate(path, include_children=include_children)
     findings.extend({"severity": "error", "kind": issue["kind"], "details": issue} for issue in simulation["issues"])
     return {"summary": summary, "findings": findings, "simulation": simulation}
 
 
-def replay(path: str | Path) -> None:
-    print(render_terminal(path, details=True))
+def replay(path: str | Path, include_children: bool = False) -> None:
+    print(render_terminal(path, details=True, include_children=include_children))
 
 
 def _duration(value: Any) -> str:
@@ -473,8 +473,8 @@ def _usage_text(span: dict[str, Any]) -> str:
     return f"{prompt}+{completion} tok{suffix}"
 
 
-def render_terminal(path: str | Path, *, details: bool = False) -> str:
-    records = load_records(path)
+def render_terminal(path: str | Path, *, details: bool = False, include_children: bool = False) -> str:
+    records = _load_trace_records(path, include_children)
     spans, _ = enrich_spans(spans_from_records(records) or _legacy_spans(records))
     lines = ["# Trace Replay", "", "序号  类型    名称                  状态       耗时       Token"]
     for index, span in enumerate(spans, 1):
@@ -493,12 +493,12 @@ def render_terminal(path: str | Path, *, details: bool = False) -> str:
                 lines.append("      输出: " + str(span["output_preview"])[:300])
             if span.get("error_preview"):
                 lines.append("      错误: " + str(span["error_preview"])[:300])
-    lines.extend(["", "# Summary", json.dumps(summarize(path), ensure_ascii=False, indent=2)])
+    lines.extend(["", "# Summary", json.dumps(summarize(path, include_children=include_children), ensure_ascii=False, indent=2)])
     return "\n".join(lines)
 
 
-def render_markdown(path: str | Path) -> str:
-    records = load_records(path)
+def render_markdown(path: str | Path, include_children: bool = False) -> str:
+    records = _load_trace_records(path, include_children)
     spans, _ = enrich_spans(spans_from_records(records) or _legacy_spans(records))
     lines = ["# Trace Replay", "", "| # | 类型 | 名称 | 状态 | 耗时 | Token |", "|---:|---|---|---|---:|---:|"]
     for index, span in enumerate(spans, 1):
@@ -506,12 +506,12 @@ def render_markdown(path: str | Path) -> str:
             f"| {index} | {span.get('kind', '?')} | {span.get('name', '?')} | {span.get('status', '?')} "
             f"| {_duration(span.get('duration_ms'))} | {_usage_text(span)} |"
         )
-    lines.extend(["", "## Summary", "", "```json", json.dumps(summarize(path), ensure_ascii=False, indent=2), "```"])
+    lines.extend(["", "## Summary", "", "```json", json.dumps(summarize(path, include_children=include_children), ensure_ascii=False, indent=2), "```"])
     return "\n".join(lines)
 
 
-def render_html(path: str | Path) -> str:
-    records = load_records(path)
+def render_html(path: str | Path, include_children: bool = False) -> str:
+    records = _load_trace_records(path, include_children)
     spans, _ = enrich_spans(spans_from_records(records) or _legacy_spans(records))
     rows = []
     for index, span in enumerate(spans, 1):
@@ -531,7 +531,7 @@ def render_html(path: str | Path) -> str:
             f"<td>{_duration(span.get('duration_ms'))}</td><td>{escape(_usage_text(span))}</td>"
             f"<td>{detail}</td></tr>"
         )
-    summary = escape(json.dumps(summarize(path), ensure_ascii=False, indent=2))
+    summary = escape(json.dumps(summarize(path, include_children=include_children), ensure_ascii=False, indent=2))
     return f"""<!doctype html>
 <html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>mini-OpenClaw Trace</title>
 <style>body{{font:14px system-ui,sans-serif;margin:32px;color:#182230}} table{{border-collapse:collapse;width:100%}}th,td{{border-bottom:1px solid #dbe2ea;padding:8px;text-align:left;vertical-align:top}}th{{background:#16294a;color:white}}tr.error{{background:#fff0f0}}pre{{background:#f4f6f8;padding:14px;border-radius:6px;overflow:auto}}td:last-child{{max-width:520px;word-break:break-word}}</style>
@@ -540,8 +540,8 @@ def render_html(path: str | Path) -> str:
 <h2>Summary</h2><pre>{summary}</pre></html>"""
 
 
-def write_html(path: str | Path, output: str | Path) -> Path:
+def write_html(path: str | Path, output: str | Path, include_children: bool = False) -> Path:
     target = Path(output)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(render_html(path), encoding="utf-8")
+    target.write_text(render_html(path, include_children=include_children), encoding="utf-8")
     return target
