@@ -1,0 +1,10 @@
+task,variant,success,reason,returncode,duration_seconds,trace_events,tool_calls,prompt_tokens,completion_tokens
+read-config,none,True,,0,4.919,7,2,10480,102
+edit-and-run,none,True,,0,21.208,29,13,55620,948
+recover-from-error,none,True,,0,30.805,42,20,96085,1209
+read-config,no-planning,True,,0,2.852,5,1,6522,59
+edit-and-run,no-planning,True,,0,17.034,23,10,39886,687
+recover-from-error,no-planning,True,,0,28.917,42,20,92366,1122
+read-config,no-memory,True,,0,7.764,7,2,10480,102
+edit-and-run,no-memory,True,,0,26.443,29,13,55494,922
+recover-from-error,no-memory,True,,0,28.289,42,20,96550,1140

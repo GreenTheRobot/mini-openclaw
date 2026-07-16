@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+cd "$ROOT"
+export MINI_OPENCLAW_PYTHON="${MINI_OPENCLAW_PYTHON:-$(command -v python)}"
+exec python -m agent.cli "$@"

@@ -1,0 +1,128 @@
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from tools.base import ToolResult
+from tools.experiment import (
+    _experiment_prepare,
+    _experiment_report,
+    _experiment_start,
+    _experiment_status,
+    _experiment_smoke_test,
+    _extract_metrics,
+)
+
+
+def test_extract_metrics():
+    assert _extract_metrics("loss=0.8 accuracy: 0.6\nloss=0.4 accuracy=0.9") == {"loss": [0.8, 0.4], "accuracy": [0.6, 0.9]}
+
+
+def test_experiment_prepare_smoke_and_report(tmp_path: Path):
+    old = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        smoke_result = _experiment_smoke_test('python -c "print(123)"')
+        assert smoke_result.success is True
+        smoke = json.loads(smoke_result.content)
+        assert smoke["success"] is True
+        metadata = json.loads(_experiment_prepare('python train.py', name="demo", seed=7))
+        assert metadata["git_repository"] is True
+        assert metadata["git_has_commit"] is True
+        assert metadata["git_commit"] != "unknown"
+        directory = Path("runs") / metadata["run_id"]
+        (directory / "train.log").write_text("loss=0.8\nloss=0.3\naccuracy=0.9\n", encoding="utf-8")
+        report = _experiment_report(metadata["run_id"])
+        assert "accuracy：final=0.9" in report
+        assert "随机种子：7" in report
+    finally:
+        os.chdir(old)
+
+
+def test_experiment_prepare_initializes_gitignore_and_initial_commit(tmp_path: Path):
+    old = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        Path("train.py").write_text("print('baseline')\n", encoding="utf-8")
+        metadata = json.loads(_experiment_prepare("python train.py", name="nogit"))
+
+        assert (tmp_path / ".git").exists()
+        assert (tmp_path / ".gitignore").exists()
+        assert "runs/" in (tmp_path / ".gitignore").read_text(encoding="utf-8")
+        assert metadata["git_repository"] is True
+        assert metadata["git_initialized"] is True
+        assert metadata["gitignore_initialized"] is True
+        assert metadata["git_initial_commit_created"] is True
+        assert metadata["git_has_commit"] is True
+        assert metadata["git_commit"] != "unknown"
+
+        log = subprocess.run(
+            ["git", "log", "--oneline", "-1"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=tmp_path,
+            check=True,
+        )
+        assert "initialize experiment baseline" in log.stdout
+    finally:
+        os.chdir(old)
+
+def _wait_for_experiment(run_id: str, timeout_seconds: float = 5) -> dict:
+    deadline = time.time() + timeout_seconds
+    status = {}
+    while time.time() < deadline:
+        status = json.loads(_experiment_status(run_id))
+        if not status.get("running"):
+            return status
+        time.sleep(0.05)
+    return status
+
+
+def test_experiment_status_treats_failed_log_as_failed_run(tmp_path: Path):
+    old = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        Path("train.py").write_text(
+            "print('loss=0.1')\nprint('status=failed')\n",
+            encoding="utf-8",
+        )
+        metadata = json.loads(_experiment_prepare(f'"{sys.executable}" train.py', name="logfailed"))
+        json.loads(_experiment_start(metadata["run_id"]))
+
+        status = _wait_for_experiment(metadata["run_id"])
+        assert status["status"] == "failed"
+        assert status["returncode"] == 0
+
+        report = _experiment_report(metadata["run_id"])
+        assert isinstance(report, ToolResult)
+        assert report.success is False
+        assert report.category == "experiment_failed"
+        assert "loss" in report.content
+    finally:
+        os.chdir(old)
+
+
+def test_experiment_status_uses_returncode_even_when_stderr_is_empty(tmp_path: Path):
+    old = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        Path("train.py").write_text(
+            "print('loss=0.1')\nraise SystemExit(7)\n",
+            encoding="utf-8",
+        )
+        metadata = json.loads(_experiment_prepare(f'"{sys.executable}" train.py', name="returncodefailed"))
+        json.loads(_experiment_start(metadata["run_id"]))
+
+        status = _wait_for_experiment(metadata["run_id"])
+        assert status["status"] == "failed"
+        assert status["returncode"] == 7
+
+        report = _experiment_report(metadata["run_id"])
+        assert isinstance(report, ToolResult)
+        assert report.success is False
+        assert report.category == "experiment_failed"
+    finally:
+        os.chdir(old)

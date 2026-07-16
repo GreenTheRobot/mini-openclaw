@@ -1,37 +1,90 @@
-"""工具抽象与注册表。
-
-核心思想（贯穿全课）：
-  「工具」就是一个有 name / description / 输入 schema / run() 的对象。
-  模型并不会"真的调用函数"——它只是生成一段文本
-  <tool_call>{"name": ..., "arguments": {...}}</tool_call>，
-  由主循环（agent/loop.py）解析出来，找到同名 Tool，执行它的 run()，
-  再把返回值作为 observation 喂回模型。
-
-Day5 实现 read/write/bash；Day6 补 edit/grep/glob；Day7 补 web_fetch/task_list。
-"""
+"""工具抽象、参数校验、结构化执行结果与默认注册表。"""
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+_JSON_TYPES = {
+    "string": str,
+    "integer": int,
+    "number": (int, float),
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+    "null": type(None),
+}
+
+
+def validate_arguments(schema: dict[str, Any], value: Any, path: str = "arguments") -> list[str]:
+    errors: list[str] = []
+    expected = schema.get("type")
+    if expected in _JSON_TYPES:
+        python_type = _JSON_TYPES[expected]
+        valid = isinstance(value, python_type)
+        if expected in {"integer", "number"} and isinstance(value, bool):
+            valid = False
+        if not valid:
+            return [f"{path} 应为 {expected}，实际为 {type(value).__name__}"]
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{path} 必须是 {schema['enum']} 之一")
+    if isinstance(value, dict):
+        properties = schema.get("properties", {})
+        for key in schema.get("required", []):
+            if key not in value:
+                errors.append(f"{path} 缺少必填字段 {key}")
+        if schema.get("additionalProperties") is False:
+            for key in value:
+                if key not in properties:
+                    errors.append(f"{path} 包含未知字段 {key}")
+        for key, child in value.items():
+            if key in properties:
+                errors.extend(validate_arguments(properties[key], child, f"{path}.{key}"))
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        for index, child in enumerate(value):
+            errors.extend(validate_arguments(schema["items"], child, f"{path}[{index}]"))
+    return errors
+
+
+@dataclass(frozen=True)
+class ToolResult:
+    """工具的显式结果，避免把失败字符串误判为成功。"""
+    content: str
+    success: bool = True
+    category: str = "ok"
+
+    def __str__(self) -> str:
+        return self.content
+
+
+def normalize_tool_result(value: Any) -> ToolResult:
+    if isinstance(value, ToolResult):
+        return value
+    text = str(value)
+    lowered = text.strip().lower()
+    legacy_error_prefixes = (
+        "[失败]", "[错误]", "[沙箱]", "[超时]", "[grep 出错]",
+        "error:", "cannot connect", "send failed", "wechat bridge returned",
+    )
+    failed = any(lowered.startswith(prefix.lower()) for prefix in legacy_error_prefixes)
+    return ToolResult(text, success=not failed, category="legacy_error" if failed else "ok")
 
 
 @dataclass
 class Tool:
     name: str
     description: str
-    # JSON Schema（OpenAI tools 格式里的 parameters）。Day3 你会明白它最终如何变成 prompt 里的文本。
     parameters: dict[str, Any]
-    run: Callable[..., str]   # run(**arguments) -> str（observation 文本）
+    run: Callable[..., Any]
+
+    def validate(self, arguments: Any) -> list[str]:
+        return validate_arguments(self.parameters, arguments)
 
     def schema(self) -> dict[str, Any]:
-        """转成 OpenAI tools 字段的一项。"""
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": self.parameters,
-            },
-        }
+        return {"type": "function", "function": {
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.parameters,
+        }}
 
 
 @dataclass
@@ -43,11 +96,14 @@ class ToolRegistry:
             raise ValueError(f"工具重名：{tool.name}")
         self._tools[tool.name] = tool
 
+    def remove(self, name: str) -> Tool | None:
+        return self._tools.pop(name, None)
+
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
 
     def schemas(self) -> list[dict[str, Any]]:
-        return [t.schema() for t in self._tools.values()]
+        return [tool.schema() for tool in self._tools.values()]
 
     def names(self) -> list[str]:
         return list(self._tools)
@@ -57,27 +113,33 @@ class ToolRegistry:
 
 
 def build_default_registry() -> ToolRegistry:
-    """组装内置工具。随课程推进逐步取消注释。"""
-    reg = ToolRegistry()
-    # TODO[Day5] 取消注释并实现：
+    registry = ToolRegistry()
     from .fs import read_tool, write_tool
     from .shell import bash_tool
-    for t in (read_tool, write_tool, bash_tool):
-        reg.register(t)
-    
-    # TODO[Day6] 再加入完整工具集（→ v1 里程碑）：
     from .edit import edit_tool
     from .grep import grep_tool
     from .glob import glob_tool
-    for t in (edit_tool, grep_tool, glob_tool):
-        reg.register(t)
-    #
-    # TODO[Day7] 再加入：
     from .web import web_fetch_tool, web_search_tool
-    for t in (web_search_tool, web_fetch_tool):
-        reg.register(t)
+    from .arxiv import arxiv_search_tool
+    from .download import download_file_tool
     from .wechat import wechat_file_transfer_tool
-    reg.register(wechat_file_transfer_tool)
-
-    #from .task import task_list_tool
-    return reg
+    from .memory import remember_tool
+    from .todo import todo_write_tool, update_todo_tool
+    from .pdf import pdf_extract_text_tool, pdf_metadata_tool
+    from .figure import paper_figure_analyze_tool
+    from .schedule import schedule_task_tool
+    from .experiment import (
+        experiment_prepare_tool, experiment_smoke_test_tool, experiment_start_tool,
+        experiment_status_tool, experiment_report_tool,
+    )
+    for tool in (
+        read_tool, write_tool, bash_tool, edit_tool, grep_tool, glob_tool,
+        arxiv_search_tool, web_search_tool, web_fetch_tool, download_file_tool, wechat_file_transfer_tool,
+        remember_tool, todo_write_tool, update_todo_tool, pdf_extract_text_tool, pdf_metadata_tool,
+        paper_figure_analyze_tool,
+        schedule_task_tool,
+        experiment_prepare_tool, experiment_smoke_test_tool, experiment_start_tool,
+        experiment_status_tool, experiment_report_tool,
+    ):
+        registry.register(tool)
+    return registry

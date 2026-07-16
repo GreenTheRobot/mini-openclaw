@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
+.env
 out-*/
 *.bin
 *.gguf
@@ -8,3 +9,15 @@ out-*/
 docx/
 *.log
 wxauto_logs/
+test/
+node_modules/
+.mini-openclaw/
+runs/
+traces/
+demo_project/model.txt
+.pytest-work/
+.pytest_cache/
+mini_openclaw.egg-info/
+demo/attention-is-all-you-need-pytorch/
+.claude/
+demo_slides/

@@ -38,7 +38,6 @@ SAMPLE_RECORDS: list[dict[str, Any]] = [
      "final": "我不确定 timeout 的值。"},
 ]
 
-
 def success_rate(tasks: list, records: list[dict]) -> float:
     """对每条 (task, trajectory) 记录跑 task.check，返回成功比例。"""
     by_name = {t.name: t for t in tasks}
@@ -49,15 +48,12 @@ def success_rate(tasks: list, records: list[dict]) -> float:
             ok += 1
     return ok / max(len(records), 1)
 
-
 def step_count(record: dict) -> int:
     return len(record["steps"])
-
 
 def token_count(record: dict) -> int:
     return sum(s.get("prompt_tokens", 0) + s.get("completion_tokens", 0)
                for s in record["steps"])
-
 
 def json_valid_rate(records: list[dict]) -> float:
     """从每步的 tool_calls（结构化）或 raw 里的 <tool_call>（文本）提取 JSON 并校验。"""
@@ -79,24 +75,10 @@ def json_valid_rate(records: list[dict]) -> float:
     return ok / max(total, 1)
 
 
-"""
-def json_valid_rate(raw_outputs: list[str]) -> float:
-    raw_outputs：模型为每条用例生成的 <tool_call>{...}</tool_call> 原文。
-    ok = 0
-    for out in raw_outputs:
-        # TODO[Day7] 抽出 {...} 部分尝试 json.loads（可复用 prompt.render.parse_tool_calls）
-        try:
-            json.loads(_extract_json(out)); ok += 1
-        except Exception:  # noqa
-            pass
-    return ok / max(len(raw_outputs), 1)
-"""
-
 
 def tool_choice_accuracy(preds: list[dict], expected_tools: list[str]) -> float:
     correct = sum(1 for p, e in zip(preds, expected_tools) if p.get("name") == e)
     return correct / max(len(expected_tools), 1)
-
 
 def arg_accuracy(preds: list[dict], expected_args: list[dict]) -> float:
     """关键参数匹配率：期望 args 的每个键值都在预测里对上。"""
@@ -107,12 +89,9 @@ def arg_accuracy(preds: list[dict], expected_args: list[dict]) -> float:
             correct += 1
     return correct / max(len(expected_args), 1)
 
-
 def _extract_json(text: str) -> str:
-    # TODO[Day7] 从 <tool_call>...</tool_call> 中取出 JSON 串
     start, end = text.find("{"), text.rfind("}")
     return text[start:end + 1] if start >= 0 else "{}"
-
 
 if __name__ == "__main__":
     from eval.tasks import SAMPLE_TASKS
